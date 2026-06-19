@@ -66,7 +66,13 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
       const updated = {
         ...existing,
-        ...body,
+        // Whitelist allowed fields
+        ...(body.name !== undefined && { name: body.name }),
+        ...(body.strength !== undefined && { strength: body.strength }),
+        ...(body.quantity !== undefined && { quantity: body.quantity }),
+        ...(body.form !== undefined && { form: body.form }),
+        ...(body.instructions !== undefined && { instructions: body.instructions }),
+        ...(body.status !== undefined && { status: body.status }),
         deviceId,
         medicineId,
         updatedAt: new Date().toISOString(),
@@ -103,9 +109,9 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
         scheduleId: uuidv4(),
         medicineId: body.medicineId,
         type: body.type, // 'absolute' | 'interval'
-        times: body.times || [],
-        intervalHours: body.intervalHours || null,
-        daysOfWeek: body.daysOfWeek || [],
+        times: body.times ?? [],
+        intervalHours: body.intervalHours ?? null,
+        daysOfWeek: body.daysOfWeek ?? [],
         status: 'active',
         createdAt: now,
         updatedAt: now,
@@ -123,7 +129,12 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
       const updated = {
         ...existing,
-        ...body,
+        // Whitelist allowed fields
+        ...(body.type !== undefined && { type: body.type }),
+        ...(body.times !== undefined && { times: body.times }),
+        ...(body.intervalHours !== undefined && { intervalHours: body.intervalHours }),
+        ...(body.daysOfWeek !== undefined && { daysOfWeek: body.daysOfWeek }),
+        ...(body.status !== undefined && { status: body.status }),
         deviceId,
         scheduleId,
         updatedAt: new Date().toISOString(),

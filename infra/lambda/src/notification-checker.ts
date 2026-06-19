@@ -73,12 +73,29 @@ export async function handler() {
   }
 }
 
+function getLocalTimeParts(now: Date, timezone: string): { hour: number; minute: number; day: number } {
+  // Use Intl.DateTimeFormat for reliable timezone conversion
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    hour: 'numeric',
+    minute: 'numeric',
+    hour12: false,
+    weekday: 'short',
+  });
+  const parts = formatter.formatToParts(now);
+  const hour = parseInt(parts.find(p => p.type === 'hour')?.value ?? '0', 10);
+  const minute = parseInt(parts.find(p => p.type === 'minute')?.value ?? '0', 10);
+
+  // Map weekday string to number
+  const dayStr = parts.find(p => p.type === 'weekday')?.value ?? '';
+  const dayMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  const day = dayMap[dayStr] ?? now.getDay();
+
+  return { hour, minute, day };
+}
+
 function isScheduleDue(schedule: Record<string, unknown>, now: Date, timezone: string): boolean {
-  // Convert to device's local time
-  const localTime = new Date(now.toLocaleString('en-US', { timeZone: timezone }));
-  const currentHour = localTime.getHours();
-  const currentMinute = localTime.getMinutes();
-  const currentDay = localTime.getDay();
+  const { hour: currentHour, minute: currentMinute, day: currentDay } = getLocalTimeParts(now, timezone);
 
   // Check day-of-week filter
   const daysOfWeek = schedule.daysOfWeek as number[] | undefined;
@@ -90,20 +107,34 @@ function isScheduleDue(schedule: Record<string, unknown>, now: Date, timezone: s
     const times = schedule.times as string[] | undefined;
     if (!times) return false;
 
-    // Check if current time matches any scheduled time (within 1-minute window)
     return times.some(time => {
-      const [h, m] = time.split(':').map(Number);
+      const parts = time.split(':');
+      const h = parseInt(parts[0], 10);
+      const m = parseInt(parts[1] || '0', 10);
+      if (isNaN(h) || isNaN(m)) return false;
       return currentHour === h && currentMinute === m;
     });
   }
 
   if (schedule.type === 'interval') {
     const intervalHours = schedule.intervalHours as number | undefined;
-    if (!intervalHours) return false;
+    if (!intervalHours || intervalHours <= 0) return false;
 
-    // For interval schedules, check every N hours from midnight
+    // Anchor interval to schedule creation time
+    const createdAt = schedule.createdAt as string | undefined;
+    if (createdAt) {
+      const created = new Date(createdAt);
+      const diffMs = now.getTime() - created.getTime();
+      const intervalMs = intervalHours * 3600 * 1000;
+      const remainder = diffMs % intervalMs;
+      // Fire if within 1-minute window of an interval boundary
+      return remainder < 60000 || remainder > (intervalMs - 60000);
+    }
+
+    // Fallback: modulo from midnight (legacy behavior)
     const minutesSinceMidnight = currentHour * 60 + currentMinute;
-    const intervalMinutes = intervalHours * 60;
+    const intervalMinutes = Math.round(intervalHours * 60);
+    if (intervalMinutes <= 0) return false;
     return minutesSinceMidnight % intervalMinutes === 0;
   }
 
@@ -111,8 +142,9 @@ function isScheduleDue(schedule: Record<string, unknown>, now: Date, timezone: s
 }
 
 async function hasDoseEventInWindow(deviceId: string, scheduleId: string, now: Date): Promise<boolean> {
-  // Check for dose events in the last 5 minutes to avoid duplicate notifications
-  const windowStart = new Date(now.getTime() - 5 * 60 * 1000).toISOString();
+  // Check for dose events in the last 30 minutes to avoid duplicate notifications
+  // (wider window handles cases where user took dose early, anticipating reminder)
+  const windowStart = new Date(now.getTime() - 30 * 60 * 1000).toISOString();
 
   const result = await ddbClient.send(new QueryCommand({
     TableName: DOSE_EVENTS_TABLE,

@@ -27,9 +27,16 @@ export function HomeScreen() {
 
   const [refreshing, setRefreshing] = useState(false);
   const [alertDose, setAlertDose] = useState<UpcomingDose | null>(null);
+  const [, setTick] = useState(0); // force re-render for time updates
 
   useEffect(() => {
     loadAll();
+  }, []);
+
+  // Re-render every 30 seconds to keep "In X min" labels current
+  useEffect(() => {
+    const timer = setInterval(() => setTick(t => t + 1), 30000);
+    return () => clearInterval(timer);
   }, []);
 
   const onRefresh = useCallback(async () => {

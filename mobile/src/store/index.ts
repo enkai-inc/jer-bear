@@ -147,20 +147,49 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   getUpcomingDoses: () => {
-    const { medicines, schedules } = get();
+    const { medicines, schedules, doseEvents } = get();
     const now = new Date();
+    const today = now.getDay(); // 0=Sun..6=Sat
     const upcoming: UpcomingDose[] = [];
+
+    // Build a set of recently handled dose keys (scheduleId + hour:minute)
+    // to filter out doses already taken/dismissed today
+    const handledKeys = new Set<string>();
+    const todayStart = new Date(now);
+    todayStart.setHours(0, 0, 0, 0);
+    for (const event of doseEvents) {
+      if (event.action === 'snoozed') continue; // snoozed doses should still show
+      const eventTime = new Date(event.timestamp);
+      if (eventTime >= todayStart) {
+        // Key by scheduleId + scheduled hour to dedup
+        const scheduledDate = new Date(event.scheduledTime);
+        const key = `${event.scheduleId}-${scheduledDate.getHours()}:${scheduledDate.getMinutes()}`;
+        handledKeys.add(key);
+      }
+    }
 
     for (const schedule of schedules) {
       if (schedule.status !== 'active') continue;
       const medicine = medicines.find(m => m.medicineId === schedule.medicineId);
       if (!medicine || medicine.status !== 'active') continue;
 
+      // Check daysOfWeek filter
+      const daysOfWeek = schedule.daysOfWeek;
+      if (daysOfWeek && daysOfWeek.length > 0 && !daysOfWeek.includes(today)) continue;
+
       if (schedule.type === 'absolute' && schedule.times) {
         for (const time of schedule.times) {
-          const [h, m] = time.split(':').map(Number);
+          const parts = time.split(':');
+          const h = parseInt(parts[0], 10);
+          const m = parseInt(parts[1] || '0', 10);
+          if (isNaN(h) || isNaN(m) || h < 0 || h > 23 || m < 0 || m > 59) continue;
+
           const scheduledTime = new Date(now);
           scheduledTime.setHours(h, m, 0, 0);
+
+          // Check if already handled
+          const key = `${schedule.scheduleId}-${h}:${m}`;
+          if (handledKeys.has(key) && scheduledTime <= now) continue;
 
           // If time has passed today, schedule for tomorrow
           if (scheduledTime < now) {
@@ -172,15 +201,25 @@ export const useStore = create<AppState>((set, get) => ({
       }
 
       if (schedule.type === 'interval' && schedule.intervalHours) {
-        const intervalMs = schedule.intervalHours * 60 * 60 * 1000;
-        const midnight = new Date(now);
-        midnight.setHours(0, 0, 0, 0);
+        const intervalHours = Number(schedule.intervalHours);
+        if (isNaN(intervalHours) || intervalHours <= 0) continue;
 
-        let next = new Date(midnight);
-        while (next < now) {
-          next = new Date(next.getTime() + intervalMs);
+        const intervalMs = intervalHours * 60 * 60 * 1000;
+
+        // Anchor to schedule creation time instead of midnight
+        const createdAt = new Date(schedule.createdAt);
+        let anchor = new Date(createdAt);
+
+        // Step forward from creation time to find the next upcoming dose
+        while (anchor < now) {
+          anchor = new Date(anchor.getTime() + intervalMs);
         }
-        upcoming.push({ medicine, schedule, scheduledTime: next });
+
+        // Check if this dose was already handled
+        const key = `${schedule.scheduleId}-${anchor.getHours()}:${anchor.getMinutes()}`;
+        if (!handledKeys.has(key)) {
+          upcoming.push({ medicine, schedule, scheduledTime: anchor });
+        }
       }
     }
 

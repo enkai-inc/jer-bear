@@ -31,7 +31,7 @@ const FORMS: { value: MedicineForm; label: string }[] = [
 export function AddMedicineScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
-  const { medicines, schedules, addMedicine, editMedicine, addSchedule, editSchedule, removeSchedule } = useStore();
+  const { medicines, schedules, addMedicine, editMedicine, removeMedicine, addSchedule, editSchedule, removeSchedule } = useStore();
 
   const editingId = route.params?.medicineId;
   const existingMedicine = editingId
@@ -85,9 +85,35 @@ export function AddMedicineScreen() {
       return;
     }
 
+    // Validate schedule times
+    if (scheduleType === 'absolute') {
+      for (const time of times) {
+        const match = time.match(/^(\d{1,2}):(\d{2})$/);
+        if (!match) {
+          Alert.alert('Invalid Time', `"${time}" is not valid. Use HH:MM format (e.g. 09:00, 14:30).`);
+          return;
+        }
+        const h = parseInt(match[1], 10);
+        const m = parseInt(match[2], 10);
+        if (h < 0 || h > 23 || m < 0 || m > 59) {
+          Alert.alert('Invalid Time', `"${time}" is out of range. Hours: 0-23, Minutes: 0-59.`);
+          return;
+        }
+      }
+    }
+
+    if (scheduleType === 'interval') {
+      const hrs = parseFloat(intervalHours);
+      if (isNaN(hrs) || hrs <= 0) {
+        Alert.alert('Invalid Interval', 'Please enter a positive number of hours.');
+        return;
+      }
+    }
+
     setSaving(true);
     try {
       let medicineId = editingId;
+      let isNewMedicine = false;
 
       if (existingMedicine) {
         await editMedicine(editingId, {
@@ -106,24 +132,31 @@ export function AddMedicineScreen() {
           instructions: instructions.trim(),
         });
         medicineId = med.medicineId;
+        isNewMedicine = true;
       }
 
       // Handle schedule
-      if (existingSchedules.length > 0) {
-        // Update existing schedule
-        await editSchedule(existingSchedules[0].scheduleId, {
-          type: scheduleType,
-          times: scheduleType === 'absolute' ? times : [],
-          intervalHours: scheduleType === 'interval' ? parseInt(intervalHours, 10) : undefined,
-        });
-      } else {
-        // Create new schedule
-        await addSchedule({
-          medicineId: medicineId!,
-          type: scheduleType,
-          times: scheduleType === 'absolute' ? times : [],
-          intervalHours: scheduleType === 'interval' ? parseInt(intervalHours, 10) : undefined,
-        });
+      const scheduleData = {
+        type: scheduleType,
+        times: scheduleType === 'absolute' ? times : [],
+        intervalHours: scheduleType === 'interval' ? parseFloat(intervalHours) : undefined,
+      };
+
+      try {
+        if (existingSchedules.length > 0) {
+          await editSchedule(existingSchedules[0].scheduleId, scheduleData);
+        } else {
+          await addSchedule({
+            medicineId: medicineId!,
+            ...scheduleData,
+          });
+        }
+      } catch (scheduleErr) {
+        // If schedule creation fails for a new medicine, clean up the orphaned medicine
+        if (isNewMedicine && medicineId) {
+          await removeMedicine(medicineId).catch(() => {});
+        }
+        throw scheduleErr;
       }
 
       navigation.goBack();

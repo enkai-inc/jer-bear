@@ -3,18 +3,21 @@ import * as Device from 'expo-device';
 import { Platform } from 'react-native';
 import { Schedule, Medicine } from '../types';
 
-// Configure notification behavior
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-  }),
-});
+// Configure notification behavior (not available on web)
+if (Platform.OS !== 'web') {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowBanner: true,
+      shouldShowList: true,
+      shouldPlaySound: true,
+      shouldSetBadge: true,
+    }),
+  });
+}
 
 // Define notification actions for dose reminders
 export async function setupNotificationCategories() {
+  if (Platform.OS === 'web') return;
   await Notifications.setNotificationCategoryAsync('DOSE_REMINDER', [
     {
       identifier: 'TAKEN',
@@ -35,6 +38,7 @@ export async function setupNotificationCategories() {
 }
 
 export async function registerForPushNotifications(): Promise<string | null> {
+  if (Platform.OS === 'web') return null;
   if (!Device.isDevice) {
     console.log('Push notifications require a physical device');
     return null;
@@ -77,8 +81,15 @@ export async function scheduleLocalNotifications(
   medicines: Medicine[],
   schedules: Schedule[],
 ) {
-  // Cancel all existing scheduled notifications
-  await Notifications.cancelAllScheduledNotificationsAsync();
+  if (Platform.OS === 'web') return;
+
+  // Preserve snooze reminders — only cancel scheduled dose notifications
+  const existing = await Notifications.getAllScheduledNotificationsAsync();
+  for (const notification of existing) {
+    const data = notification.content.data as { type?: string } | null;
+    if (data?.type === 'snooze_reminder') continue; // keep snooze notifications
+    await Notifications.cancelScheduledNotificationAsync(notification.identifier);
+  }
 
   for (const schedule of schedules) {
     if (schedule.status !== 'active') continue;
@@ -91,7 +102,10 @@ export async function scheduleLocalNotifications(
 
     if (schedule.type === 'absolute' && schedule.times) {
       for (const time of schedule.times) {
-        const [hour, minute] = time.split(':').map(Number);
+        const parts = time.split(':');
+        const hour = parseInt(parts[0], 10);
+        const minute = parseInt(parts[1] || '0', 10);
+        if (isNaN(hour) || isNaN(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) continue;
 
         await Notifications.scheduleNotificationAsync({
           content: {
@@ -144,6 +158,7 @@ export async function scheduleLocalNotifications(
  * Schedule a snooze notification (5 minutes from now).
  */
 export async function scheduleSnooze(medicine: Medicine, scheduleId: string) {
+  if (Platform.OS === 'web') return;
   const qty = medicine.quantity !== 1 ? `${medicine.quantity} x ` : '';
 
   await Notifications.scheduleNotificationAsync({
@@ -153,7 +168,7 @@ export async function scheduleSnooze(medicine: Medicine, scheduleId: string) {
       data: {
         medicineId: medicine.medicineId,
         scheduleId,
-        type: 'dose_reminder',
+        type: 'snooze_reminder',
       },
       sound: 'default',
       categoryIdentifier: 'DOSE_REMINDER',

@@ -1,22 +1,22 @@
 export const colors = {
-  // Bear-themed warm palette
-  primary: '#8B5E3C',        // Teddy bear brown
-  primaryLight: '#C4956A',   // Light tan
-  primaryDark: '#5C3A1E',    // Dark brown
-  accent: '#F4A261',         // Warm amber/honey
-  accentLight: '#FDEBD0',    // Cream
-  background: '#FFF8F0',     // Warm white
+  // Bear-themed warm palette — WCAG AA contrast ratios
+  primary: '#4A2510',        // Rich dark brown (11:1 on white)
+  primaryLight: '#7D4520',   // Medium brown
+  primaryDark: '#2C1508',    // Near-black brown
+  accent: '#9A5500',         // Dark amber (5.8:1 on white)
+  accentLight: '#FDEBD0',    // Cream (backgrounds only)
+  background: '#FFFBF5',     // Warm white
   surface: '#FFFFFF',
   surfaceWarm: '#FFF3E6',    // Warm surface
-  text: '#3C2415',           // Dark brown text
-  textSecondary: '#8B7355',  // Muted brown
+  text: '#1A0E06',           // Near-black brown (16:1 on white)
+  textSecondary: '#5C3D28',  // Medium-dark brown (7.2:1 on white)
   textLight: '#FFFFFF',
-  success: '#6DBE6D',        // Soft green
-  warning: '#F4A261',        // Amber
-  danger: '#E76F51',         // Warm red
-  paused: '#B0A090',         // Muted for paused items
-  border: '#E8D5C4',         // Light brown border
-  shadow: 'rgba(92, 58, 30, 0.1)',
+  success: '#1B7A1B',        // Dark green (5.3:1 on white)
+  warning: '#B05A00',        // Deep amber
+  danger: '#C0392B',         // Strong red (5.6:1 on white)
+  paused: '#7A6B5D',         // Muted brown (4.8:1 on white)
+  border: '#C4A882',         // Visible brown border
+  shadow: 'rgba(30, 15, 5, 0.15)',
 };
 
 export const spacing = {

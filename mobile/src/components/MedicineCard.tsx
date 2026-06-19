@@ -18,7 +18,10 @@ export function MedicineCard({ medicine, schedules, onPress, onTogglePause }: Me
   function formatSchedule(schedule: Schedule): string {
     if (schedule.type === 'absolute' && schedule.times) {
       return schedule.times.map(t => {
-        const [h, m] = t.split(':').map(Number);
+        const parts = t.split(':');
+        const h = parseInt(parts[0], 10);
+        const m = parseInt(parts[1] || '0', 10);
+        if (isNaN(h) || isNaN(m)) return t; // show raw value if invalid
         const ampm = h >= 12 ? 'PM' : 'AM';
         const hour = h % 12 || 12;
         return `${hour}:${m.toString().padStart(2, '0')} ${ampm}`;
