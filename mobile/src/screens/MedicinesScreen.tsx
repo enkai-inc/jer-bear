@@ -10,12 +10,14 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { MedicinesStackParamList } from '../navigation/types';
 import { colors, spacing, borderRadius } from '../theme';
 import { MedicineCard } from '../components/MedicineCard';
 import { useStore } from '../store';
 
 export function MedicinesScreen() {
-  const navigation = useNavigation<any>();
+  const navigation = useNavigation<NativeStackNavigationProp<MedicinesStackParamList>>();
   const { medicines, schedules, removeMedicine, toggleMedicinePause } = useStore();
 
   function handleDelete(medicineId: string, name: string) {
@@ -40,6 +42,8 @@ export function MedicinesScreen() {
         <TouchableOpacity
           style={styles.addButton}
           onPress={() => navigation.navigate('AddMedicine')}
+          accessibilityLabel="Add medicine"
+          accessibilityRole="button"
         >
           <Ionicons name="add" size={24} color={colors.textLight} />
         </TouchableOpacity>
@@ -58,6 +62,9 @@ export function MedicinesScreen() {
           data={medicines}
           keyExtractor={(item) => item.medicineId}
           contentContainerStyle={styles.list}
+          removeClippedSubviews={true}
+          maxToRenderPerBatch={10}
+          windowSize={5}
           renderItem={({ item }) => (
             <MedicineCard
               medicine={item}

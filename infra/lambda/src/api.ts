@@ -13,9 +13,79 @@ function response(statusCode: number, body: unknown): APIGatewayProxyResult {
   };
 }
 
+const MAX_STRING_LENGTH = 500;
+const VALID_FORMS = ['tablet', 'capsule', 'shot', 'powder', 'liquid', 'drops', 'puff', 'other'];
+const VALID_ACTIONS = ['taken', 'dismissed', 'snoozed', 'missed'];
+const VALID_SCHEDULE_TYPES = ['absolute', 'interval'];
+const TIME_REGEX = /^\d{1,2}:\d{2}$/;
+
+function sanitizeString(val: unknown, maxLen = MAX_STRING_LENGTH): string {
+  if (typeof val !== 'string') return '';
+  return val.trim().slice(0, maxLen);
+}
+
+function validateMedicineInput(body: Record<string, unknown>): string | null {
+  const name = sanitizeString(body.name);
+  if (!name) return 'Medicine name is required';
+  if (name.length > 200) return 'Medicine name too long';
+
+  const strength = sanitizeString(body.strength);
+  if (!strength) return 'Strength is required';
+
+  if (body.quantity !== undefined) {
+    const qty = Number(body.quantity);
+    if (isNaN(qty) || qty <= 0 || qty > 100) return 'Quantity must be between 0 and 100';
+  }
+
+  if (body.form !== undefined && !VALID_FORMS.includes(body.form as string)) {
+    return 'Invalid medicine form';
+  }
+
+  return null;
+}
+
+function validateScheduleInput(body: Record<string, unknown>): string | null {
+  if (!body.medicineId || typeof body.medicineId !== 'string') return 'medicineId is required';
+  if (!body.type || !VALID_SCHEDULE_TYPES.includes(body.type as string)) return 'Invalid schedule type';
+
+  if (body.type === 'absolute') {
+    const times = body.times;
+    if (!Array.isArray(times) || times.length === 0) return 'At least one time is required for absolute schedules';
+    if (times.length > 24) return 'Too many times specified';
+    for (const t of times) {
+      if (typeof t !== 'string' || !TIME_REGEX.test(t)) return `Invalid time format: ${t}`;
+      const [h, m] = t.split(':').map(Number);
+      if (h < 0 || h > 23 || m < 0 || m > 59) return `Time out of range: ${t}`;
+    }
+  }
+
+  if (body.type === 'interval') {
+    const hrs = Number(body.intervalHours);
+    if (isNaN(hrs) || hrs <= 0 || hrs > 168) return 'intervalHours must be between 0 and 168';
+  }
+
+  if (body.daysOfWeek !== undefined) {
+    if (!Array.isArray(body.daysOfWeek)) return 'daysOfWeek must be an array';
+    for (const d of body.daysOfWeek) {
+      if (typeof d !== 'number' || d < 0 || d > 6) return 'Invalid day of week';
+    }
+  }
+
+  return null;
+}
+
+function validateDoseInput(body: Record<string, unknown>): string | null {
+  if (!body.medicineId || typeof body.medicineId !== 'string') return 'medicineId is required';
+  if (!body.scheduleId || typeof body.scheduleId !== 'string') return 'scheduleId is required';
+  if (!body.scheduledTime || typeof body.scheduledTime !== 'string') return 'scheduledTime is required';
+  if (!body.action || !VALID_ACTIONS.includes(body.action as string)) return 'Invalid action';
+  return null;
+}
+
 function getDeviceId(event: APIGatewayProxyEvent): string {
   const deviceId = event.headers['x-device-id'] || event.headers['X-Device-Id'];
   if (!deviceId) throw new Error('Missing X-Device-Id header');
+  if (deviceId.length > 128 || !/^[\w-]+$/.test(deviceId)) throw new Error('Invalid X-Device-Id format');
   return deviceId;
 }
 
@@ -34,6 +104,8 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
     if (resource === '/medicines' && httpMethod === 'POST') {
       const deviceId = getDeviceId(event);
+      const validationError = validateMedicineInput(body);
+      if (validationError) return response(400, { error: validationError });
       const now = new Date().toISOString();
       const medicine = {
         deviceId,
@@ -64,14 +136,22 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       const existing = await db.getMedicine(deviceId, medicineId);
       if (!existing) return response(404, { error: 'Medicine not found' });
 
+      if (body.quantity !== undefined) {
+        const qty = Number(body.quantity);
+        if (isNaN(qty) || qty <= 0 || qty > 100) return response(400, { error: 'Quantity must be between 0 and 100' });
+      }
+      if (body.form !== undefined && !VALID_FORMS.includes(body.form as string)) {
+        return response(400, { error: 'Invalid medicine form' });
+      }
+
       const updated = {
         ...existing,
         // Whitelist allowed fields
-        ...(body.name !== undefined && { name: body.name }),
-        ...(body.strength !== undefined && { strength: body.strength }),
+        ...(body.name !== undefined && { name: sanitizeString(body.name) }),
+        ...(body.strength !== undefined && { strength: sanitizeString(body.strength) }),
         ...(body.quantity !== undefined && { quantity: body.quantity }),
         ...(body.form !== undefined && { form: body.form }),
-        ...(body.instructions !== undefined && { instructions: body.instructions }),
+        ...(body.instructions !== undefined && { instructions: sanitizeString(body.instructions) }),
         ...(body.status !== undefined && { status: body.status }),
         deviceId,
         medicineId,
@@ -103,6 +183,8 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
     if (resource === '/schedules' && httpMethod === 'POST') {
       const deviceId = getDeviceId(event);
+      const validationError = validateScheduleInput(body);
+      if (validationError) return response(400, { error: validationError });
       const now = new Date().toISOString();
       const schedule = {
         deviceId,
@@ -153,15 +235,15 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
     if (resource === '/doses' && httpMethod === 'GET') {
       const deviceId = getDeviceId(event);
-      const limit = event.queryStringParameters?.limit
-        ? parseInt(event.queryStringParameters.limit, 10)
-        : 50;
+      const limit = Math.min(Math.max(parseInt(event.queryStringParameters?.limit || '50', 10) || 50, 1), 200);
       const events = await db.getDoseEvents(deviceId, limit);
       return response(200, events);
     }
 
     if (resource === '/doses' && httpMethod === 'POST') {
       const deviceId = getDeviceId(event);
+      const validationError = validateDoseInput(body);
+      if (validationError) return response(400, { error: validationError });
       const doseEvent = {
         deviceId,
         eventId: uuidv4(),
@@ -220,7 +302,8 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     }
 
     if (resource === '/caregiver/{code}' && httpMethod === 'GET') {
-      const code = event.pathParameters!.code!;
+      const code = (event.pathParameters!.code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+      if (code.length !== 6) return response(400, { error: 'Invalid caregiver code format' });
       const device = await db.getDeviceByCaregiverCode(code);
       if (!device) return response(404, { error: 'Invalid caregiver code' });
 

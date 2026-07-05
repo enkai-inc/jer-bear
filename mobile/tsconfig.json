@@ -3,5 +3,6 @@
   "compilerOptions": {
     "strict": true,
     "noImplicitAny": false
-  }
+  },
+  "exclude": ["**/__tests__/**", "**/*.test.ts", "**/*.test.tsx", "jest.config.js"]
 }

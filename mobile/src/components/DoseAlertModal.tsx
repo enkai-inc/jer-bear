@@ -12,7 +12,7 @@ interface DoseAlertModalProps {
   onDismiss: () => void;
 }
 
-export function DoseAlertModal({
+export const DoseAlertModal = React.memo(function DoseAlertModal({
   visible,
   medicine,
   scheduledTime,
@@ -46,6 +46,8 @@ export function DoseAlertModal({
             <TouchableOpacity
               style={[styles.button, styles.takenButton]}
               onPress={onTaken}
+              accessibilityRole="button"
+              accessibilityLabel="Mark dose as taken"
             >
               <Text style={styles.takenText}>Taken</Text>
             </TouchableOpacity>
@@ -54,6 +56,8 @@ export function DoseAlertModal({
               <TouchableOpacity
                 style={[styles.button, styles.snoozeButton]}
                 onPress={onSnooze}
+                accessibilityRole="button"
+                accessibilityLabel="Snooze for 5 minutes"
               >
                 <Text style={styles.snoozeText}>Snooze 5 min</Text>
               </TouchableOpacity>
@@ -61,6 +65,8 @@ export function DoseAlertModal({
               <TouchableOpacity
                 style={[styles.button, styles.dismissButton]}
                 onPress={onDismiss}
+                accessibilityRole="button"
+                accessibilityLabel="Dismiss reminder"
               >
                 <Text style={styles.dismissText}>Dismiss</Text>
               </TouchableOpacity>
@@ -70,7 +76,7 @@ export function DoseAlertModal({
       </View>
     </Modal>
   );
-}
+});
 
 const styles = StyleSheet.create({
   overlay: {

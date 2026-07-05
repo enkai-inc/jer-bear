@@ -7,7 +7,7 @@ interface BearMascotProps {
   message?: string;
 }
 
-export function BearMascot({ size = 'large', message }: BearMascotProps) {
+export const BearMascot = React.memo(function BearMascot({ size = 'large', message }: BearMascotProps) {
   const bearSize = size === 'large' ? 100 : 60;
   const fontSize = size === 'large' ? 64 : 40;
 
@@ -24,7 +24,7 @@ export function BearMascot({ size = 'large', message }: BearMascotProps) {
       )}
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   container: {

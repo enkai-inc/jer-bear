@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -59,7 +59,7 @@ export function HistoryScreen() {
     return Object.entries(groups).map(([title, data]) => ({ title, data }));
   }
 
-  const sections = getSections();
+  const sections = useMemo(() => getSections(), [doseEvents]);
 
   return (
     <SafeAreaView style={styles.container}>

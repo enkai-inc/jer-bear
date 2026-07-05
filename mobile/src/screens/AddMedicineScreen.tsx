@@ -12,10 +12,13 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { RouteProp } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, borderRadius } from '../theme';
 import { useStore } from '../store';
 import { ScheduleType, MedicineForm } from '../types';
+import { MedicinesStackParamList } from '../navigation/types';
 
 const FORMS: { value: MedicineForm; label: string }[] = [
   { value: 'tablet', label: 'Tablet' },
@@ -29,8 +32,8 @@ const FORMS: { value: MedicineForm; label: string }[] = [
 ];
 
 export function AddMedicineScreen() {
-  const navigation = useNavigation<any>();
-  const route = useRoute<any>();
+  const navigation = useNavigation<NativeStackNavigationProp<MedicinesStackParamList>>();
+  const route = useRoute<RouteProp<MedicinesStackParamList, 'EditMedicine'>>();
   const { medicines, schedules, addMedicine, editMedicine, removeMedicine, addSchedule, editSchedule, removeSchedule } = useStore();
 
   const editingId = route.params?.medicineId;
@@ -174,7 +177,11 @@ export function AddMedicineScreen() {
         style={{ flex: 1 }}
       >
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()}>
+          <TouchableOpacity
+            onPress={() => navigation.goBack()}
+            accessibilityLabel="Go back"
+            accessibilityRole="button"
+          >
             <Ionicons name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>
@@ -191,6 +198,7 @@ export function AddMedicineScreen() {
             onChangeText={setName}
             placeholder="e.g. Aspirin"
             placeholderTextColor={colors.paused}
+            accessibilityLabel="Medicine name"
           />
 
           <Text style={styles.label}>Strength (per unit)</Text>
@@ -200,6 +208,7 @@ export function AddMedicineScreen() {
             onChangeText={setStrength}
             placeholder="e.g. 10mg, 40mg, 17g"
             placeholderTextColor={colors.paused}
+            accessibilityLabel="Medicine strength"
           />
 
           <Text style={styles.label}>Quantity per dose</Text>
@@ -210,6 +219,7 @@ export function AddMedicineScreen() {
             placeholder="e.g. 1, 1.5, 2"
             placeholderTextColor={colors.paused}
             keyboardType="decimal-pad"
+            accessibilityLabel="Quantity per dose"
           />
 
           <Text style={styles.label}>Form</Text>
@@ -219,6 +229,9 @@ export function AddMedicineScreen() {
                 key={f.value}
                 style={[styles.unitChip, form === f.value && styles.unitChipActive]}
                 onPress={() => setForm(f.value)}
+                accessibilityRole="button"
+                accessibilityLabel={`Select ${f.label} form`}
+                accessibilityState={{ selected: form === f.value }}
               >
                 <Text
                   style={[
@@ -240,6 +253,7 @@ export function AddMedicineScreen() {
             placeholder="e.g. Take with food"
             placeholderTextColor={colors.paused}
             multiline
+            accessibilityLabel="Instructions"
           />
 
           <Text style={styles.sectionTitle}>Schedule</Text>

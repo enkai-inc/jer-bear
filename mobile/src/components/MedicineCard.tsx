@@ -11,7 +11,7 @@ interface MedicineCardProps {
   onTogglePause: () => void;
 }
 
-export function MedicineCard({ medicine, schedules, onPress, onTogglePause }: MedicineCardProps) {
+export const MedicineCard = React.memo(function MedicineCard({ medicine, schedules, onPress, onTogglePause }: MedicineCardProps) {
   const isPaused = medicine.status === 'paused';
   const activeSchedules = schedules.filter(s => s.medicineId === medicine.medicineId);
 
@@ -38,6 +38,7 @@ export function MedicineCard({ medicine, schedules, onPress, onTogglePause }: Me
       style={[styles.card, isPaused && styles.cardPaused]}
       onPress={onPress}
       activeOpacity={0.7}
+      accessibilityLabel={`${medicine.name}, ${medicine.strength}, ${isPaused ? 'paused' : 'active'}`}
     >
       <View style={styles.content}>
         <View style={styles.header}>
@@ -52,7 +53,12 @@ export function MedicineCard({ medicine, schedules, onPress, onTogglePause }: Me
               {medicine.quantity !== 1 ? `${medicine.quantity} x ` : ''}{medicine.strength} ({medicine.form})
             </Text>
           </View>
-          <TouchableOpacity onPress={onTogglePause} style={styles.pauseButton}>
+          <TouchableOpacity
+            onPress={onTogglePause}
+            style={styles.pauseButton}
+            accessibilityLabel={isPaused ? 'Resume medicine' : 'Pause medicine'}
+            accessibilityRole="button"
+          >
             <Ionicons
               name={isPaused ? 'play-circle' : 'pause-circle'}
               size={28}
@@ -84,7 +90,7 @@ export function MedicineCard({ medicine, schedules, onPress, onTogglePause }: Me
       </View>
     </TouchableOpacity>
   );
-}
+});
 
 const styles = StyleSheet.create({
   card: {
