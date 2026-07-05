@@ -15,6 +15,97 @@ if (Platform.OS !== 'web') {
   });
 }
 
+// ─── Web Notifications (Browser API) ───────────────────────────
+
+let webPermissionGranted = false;
+
+export async function requestWebNotificationPermission(): Promise<boolean> {
+  if (Platform.OS !== 'web' || typeof window === 'undefined' || !('Notification' in window)) {
+    return false;
+  }
+  if (Notification.permission === 'granted') {
+    webPermissionGranted = true;
+    return true;
+  }
+  if (Notification.permission === 'denied') return false;
+  const result = await Notification.requestPermission();
+  webPermissionGranted = result === 'granted';
+  return webPermissionGranted;
+}
+
+export function sendWebNotification(title: string, body: string, data?: Record<string, string>) {
+  if (Platform.OS !== 'web' || !webPermissionGranted || typeof window === 'undefined' || !('Notification' in window)) {
+    return;
+  }
+  try {
+    new Notification(title, { body, icon: '🧸', tag: data?.scheduleId });
+  } catch {
+    // Safari/iOS web doesn't support Notification constructor
+  }
+}
+
+// Track active web timers so we can cancel them
+const webTimers: ReturnType<typeof setTimeout>[] = [];
+
+export function clearWebTimers() {
+  for (const t of webTimers) clearTimeout(t);
+  webTimers.length = 0;
+}
+
+export function scheduleWebNotifications(medicines: Medicine[], schedules: Schedule[]) {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+  clearWebTimers();
+
+  const now = new Date();
+  for (const schedule of schedules) {
+    if (schedule.status !== 'active') continue;
+    const medicine = medicines.find(m => m.medicineId === schedule.medicineId);
+    if (!medicine || medicine.status !== 'active') continue;
+
+    const qty = medicine.quantity !== 1 ? `${medicine.quantity} x ` : '';
+    const body = `Take ${qty}${medicine.strength} (${medicine.form})${medicine.instructions ? ` — ${medicine.instructions}` : ''}`;
+
+    if (schedule.type === 'absolute' && schedule.times) {
+      for (const time of schedule.times) {
+        const parts = time.split(':');
+        const h = parseInt(parts[0], 10);
+        const m = parseInt(parts[1] || '0', 10);
+        if (isNaN(h) || isNaN(m)) continue;
+
+        const target = new Date(now);
+        target.setHours(h, m, 0, 0);
+        if (target <= now) target.setDate(target.getDate() + 1);
+
+        const delayMs = target.getTime() - now.getTime();
+        // Only schedule within next 24 hours
+        if (delayMs > 0 && delayMs <= 86400000) {
+          const timer = setTimeout(() => {
+            sendWebNotification(`🧸 ${medicine.name}`, body, {
+              medicineId: medicine.medicineId,
+              scheduleId: schedule.scheduleId,
+            });
+          }, delayMs);
+          webTimers.push(timer);
+        }
+      }
+    }
+
+    if (schedule.type === 'interval' && schedule.intervalHours) {
+      const intervalMs = schedule.intervalHours * 3600000;
+      // First fire after intervalHours from now, then repeating
+      const timer = setTimeout(function fire() {
+        sendWebNotification(`🧸 ${medicine.name}`, body, {
+          medicineId: medicine.medicineId,
+          scheduleId: schedule.scheduleId,
+        });
+        const next = setTimeout(fire, intervalMs);
+        webTimers.push(next);
+      }, intervalMs);
+      webTimers.push(timer);
+    }
+  }
+}
+
 // Define notification actions for dose reminders
 export async function setupNotificationCategories() {
   if (Platform.OS === 'web') return;

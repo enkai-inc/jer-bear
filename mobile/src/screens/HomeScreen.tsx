@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,7 @@ import { BearMascot } from '../components/BearMascot';
 import { DoseAlertModal } from '../components/DoseAlertModal';
 import { useStore } from '../store';
 import { UpcomingDose } from '../types';
+import { sendWebNotification } from '../services/notifications';
 
 export function HomeScreen() {
   const {
@@ -31,16 +32,40 @@ export function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [alertDose, setAlertDose] = useState<UpcomingDose | null>(null);
   const [, setTick] = useState(0); // force re-render for time updates
+  const alertedDoses = useRef(new Set<string>());
 
   useEffect(() => {
     loadAll();
   }, []);
 
-  // Re-render every 30 seconds to keep "In X min" labels current
+  // Check every 30 seconds for due doses — auto-pop the alert modal and fire web notification
   useEffect(() => {
-    const timer = setInterval(() => setTick(t => t + 1), 30000);
+    function checkDueDoses() {
+      setTick(t => t + 1); // also refreshes "In X min" labels
+      const doses = getUpcomingDoses();
+      const now = new Date();
+      for (const dose of doses) {
+        const diffMs = dose.scheduledTime.getTime() - now.getTime();
+        // Dose is due (within 1 minute window)
+        if (diffMs <= 0 && diffMs > -60000) {
+          const key = `${dose.schedule.scheduleId}-${dose.scheduledTime.getTime()}`;
+          if (!alertedDoses.current.has(key)) {
+            alertedDoses.current.add(key);
+            setAlertDose(dose);
+            const qty = dose.medicine.quantity !== 1 ? `${dose.medicine.quantity} x ` : '';
+            sendWebNotification(
+              `🧸 ${dose.medicine.name}`,
+              `Take ${qty}${dose.medicine.strength} (${dose.medicine.form})`,
+            );
+            break; // one alert at a time
+          }
+        }
+      }
+    }
+    const timer = setInterval(checkDueDoses, 30000);
+    checkDueDoses(); // check immediately
     return () => clearInterval(timer);
-  }, []);
+  }, [medicines, schedules, doseEvents]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
