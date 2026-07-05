@@ -3,6 +3,8 @@ import { StatusBar } from 'expo-status-bar';
 import { Platform } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as Notifications from 'expo-notifications';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Crypto from 'expo-crypto';
 import { AppNavigator } from './src/navigation';
 import { useStore } from './src/store';
 import {
@@ -13,10 +15,15 @@ import {
 } from './src/services/notifications';
 import * as api from './src/services/api';
 
-// Generate or retrieve a stable device ID
-function getOrCreateDeviceId(): string {
-  // In production, use AsyncStorage or SecureStore for persistence
-  return 'jer-bear-device-001';
+const DEVICE_ID_KEY = '@jer_bear_device_id';
+
+// Generate or retrieve a stable device ID persisted across app launches
+async function getOrCreateDeviceId(): Promise<string> {
+  const existing = await AsyncStorage.getItem(DEVICE_ID_KEY);
+  if (existing) return existing;
+  const id = Crypto.randomUUID();
+  await AsyncStorage.setItem(DEVICE_ID_KEY, id);
+  return id;
 }
 
 export default function App() {
@@ -24,7 +31,7 @@ export default function App() {
 
   useEffect(() => {
     async function init() {
-      const deviceId = getOrCreateDeviceId();
+      const deviceId = await getOrCreateDeviceId();
       setDeviceId(deviceId);
 
       await setupNotificationCategories();

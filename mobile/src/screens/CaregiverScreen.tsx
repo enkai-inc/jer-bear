@@ -76,7 +76,7 @@ export function CaregiverScreen() {
             <View style={styles.codeCard}>
               <Text style={styles.codeLabel}>Your Code</Text>
               <Text style={styles.code}>{caregiverCode}</Text>
-              <TouchableOpacity style={styles.shareButton} onPress={handleShare}>
+              <TouchableOpacity style={styles.shareButton} onPress={handleShare} accessibilityRole="button">
                 <Ionicons name="share" size={18} color={colors.textLight} />
                 <Text style={styles.shareText}>Share Code</Text>
               </TouchableOpacity>
@@ -86,6 +86,7 @@ export function CaregiverScreen() {
               style={styles.generateButton}
               onPress={handleGenerate}
               disabled={generating}
+              accessibilityRole="button"
             >
               <Text style={styles.generateText}>
                 {generating ? 'Generating...' : 'Generate Caregiver Code'}
@@ -113,6 +114,7 @@ export function CaregiverScreen() {
               placeholderTextColor={colors.paused}
               autoCapitalize="characters"
               maxLength={6}
+              accessibilityLabel="Caregiver code input"
             />
             <TouchableOpacity
               style={styles.lookupButton}

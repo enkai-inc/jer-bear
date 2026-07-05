@@ -11,8 +11,10 @@ import { AddMedicineScreen } from '../screens/AddMedicineScreen';
 import { HistoryScreen } from '../screens/HistoryScreen';
 import { CaregiverScreen } from '../screens/CaregiverScreen';
 
-const Tab = createBottomTabNavigator();
-const Stack = createNativeStackNavigator();
+import { RootTabParamList, MedicinesStackParamList } from './types';
+
+const Tab = createBottomTabNavigator<RootTabParamList>();
+const Stack = createNativeStackNavigator<MedicinesStackParamList>();
 
 function MedicinesStack() {
   return (

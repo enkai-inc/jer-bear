@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -19,10 +19,13 @@ export function HomeScreen() {
   const {
     medicines,
     schedules,
+    doseEvents,
     loading,
     loadAll,
     getUpcomingDoses,
     recordDoseAction,
+    error,
+    clearError,
   } = useStore();
 
   const [refreshing, setRefreshing] = useState(false);
@@ -45,7 +48,7 @@ export function HomeScreen() {
     setRefreshing(false);
   }, [loadAll]);
 
-  const upcoming = getUpcomingDoses();
+  const upcoming = useMemo(() => getUpcomingDoses(), [medicines, schedules, doseEvents]);
   const activeMeds = medicines.filter(m => m.status === 'active').length;
 
   function getBearMessage(): string {
@@ -102,6 +105,14 @@ export function HomeScreen() {
         }
       >
         <Text style={styles.title}>Jer-Bear</Text>
+        {error && (
+          <View style={styles.errorBanner}>
+            <Text style={styles.errorText}>{error}</Text>
+            <TouchableOpacity onPress={() => { clearError(); loadAll(); }} style={styles.retryButton} accessibilityLabel="Retry loading" accessibilityRole="button">
+              <Text style={styles.retryText}>Retry</Text>
+            </TouchableOpacity>
+          </View>
+        )}
         <BearMascot message={getBearMessage()} />
 
         <View style={styles.statsRow}>
@@ -131,6 +142,8 @@ export function HomeScreen() {
               key={`${dose.schedule.scheduleId}-${i}`}
               style={styles.doseCard}
               onPress={() => setAlertDose(dose)}
+              accessibilityLabel={`${dose.medicine.name}, ${dose.medicine.strength}, scheduled at ${formatTime(dose.scheduledTime)}, ${formatRelativeTime(dose.scheduledTime)}`}
+              accessibilityRole="button"
             >
               <View style={styles.doseTime}>
                 <Text style={styles.doseTimeText}>
@@ -270,5 +283,32 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.textSecondary,
     marginTop: 2,
+  },
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.danger + '15',
+    borderRadius: borderRadius.md,
+    padding: spacing.sm,
+    marginBottom: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.danger + '40',
+  },
+  errorText: {
+    flex: 1,
+    fontSize: 13,
+    color: colors.danger,
+  },
+  retryButton: {
+    backgroundColor: colors.danger,
+    borderRadius: borderRadius.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    marginLeft: spacing.sm,
+  },
+  retryText: {
+    color: colors.textLight,
+    fontSize: 13,
+    fontWeight: '600',
   },
 });
