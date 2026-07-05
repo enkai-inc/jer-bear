@@ -2,6 +2,7 @@ import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import { Platform } from 'react-native';
 import { Schedule, Medicine } from '../types';
+import { appendLog } from './logger';
 
 // Configure notification behavior (not available on web)
 if (Platform.OS !== 'web') {
@@ -21,26 +22,34 @@ let webPermissionGranted = false;
 
 export async function requestWebNotificationPermission(): Promise<boolean> {
   if (Platform.OS !== 'web' || typeof window === 'undefined' || !('Notification' in window)) {
+    appendLog('info', 'webNotif', `Skipped: platform=${Platform.OS}, window=${typeof window !== 'undefined'}, NotificationAPI=${'Notification' in (typeof window !== 'undefined' ? window : {})}`);
     return false;
   }
   if (Notification.permission === 'granted') {
     webPermissionGranted = true;
+    appendLog('info', 'webNotif', 'Permission already granted');
     return true;
   }
-  if (Notification.permission === 'denied') return false;
+  if (Notification.permission === 'denied') {
+    appendLog('warn', 'webNotif', 'Permission denied by user');
+    return false;
+  }
   const result = await Notification.requestPermission();
   webPermissionGranted = result === 'granted';
+  appendLog('info', 'webNotif', `Permission request result: ${result}`);
   return webPermissionGranted;
 }
 
 export function sendWebNotification(title: string, body: string, data?: Record<string, string>) {
   if (Platform.OS !== 'web' || !webPermissionGranted || typeof window === 'undefined' || !('Notification' in window)) {
+    appendLog('warn', 'webNotif', `sendWebNotification skipped: platform=${Platform.OS}, permission=${webPermissionGranted}`);
     return;
   }
   try {
     new Notification(title, { body, icon: '🧸', tag: data?.scheduleId });
-  } catch {
-    // Safari/iOS web doesn't support Notification constructor
+    appendLog('info', 'webNotif', `Sent: "${title}" — ${body}`);
+  } catch (e) {
+    appendLog('error', 'webNotif', `Failed to send: ${e}`);
   }
 }
 
@@ -53,10 +62,15 @@ export function clearWebTimers() {
 }
 
 export function scheduleWebNotifications(medicines: Medicine[], schedules: Schedule[]) {
-  if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+  if (Platform.OS !== 'web' || typeof window === 'undefined') {
+    appendLog('info', 'webSched', `Skipped: platform=${Platform.OS}`);
+    return;
+  }
   clearWebTimers();
 
   const now = new Date();
+  let scheduled = 0;
+
   for (const schedule of schedules) {
     if (schedule.status !== 'active') continue;
     const medicine = medicines.find(m => m.medicineId === schedule.medicineId);
@@ -79,6 +93,8 @@ export function scheduleWebNotifications(medicines: Medicine[], schedules: Sched
         const delayMs = target.getTime() - now.getTime();
         // Only schedule within next 24 hours
         if (delayMs > 0 && delayMs <= 86400000) {
+          const delayMins = Math.round(delayMs / 60000);
+          appendLog('info', 'webSched', `Timer: ${medicine.name} at ${time} (in ${delayMins}m)`);
           const timer = setTimeout(() => {
             sendWebNotification(`🧸 ${medicine.name}`, body, {
               medicineId: medicine.medicineId,
@@ -86,13 +102,14 @@ export function scheduleWebNotifications(medicines: Medicine[], schedules: Sched
             });
           }, delayMs);
           webTimers.push(timer);
+          scheduled++;
         }
       }
     }
 
     if (schedule.type === 'interval' && schedule.intervalHours) {
       const intervalMs = schedule.intervalHours * 3600000;
-      // First fire after intervalHours from now, then repeating
+      appendLog('info', 'webSched', `Timer: ${medicine.name} every ${schedule.intervalHours}h`);
       const timer = setTimeout(function fire() {
         sendWebNotification(`🧸 ${medicine.name}`, body, {
           medicineId: medicine.medicineId,
@@ -102,8 +119,11 @@ export function scheduleWebNotifications(medicines: Medicine[], schedules: Sched
         webTimers.push(next);
       }, intervalMs);
       webTimers.push(timer);
+      scheduled++;
     }
   }
+
+  appendLog('info', 'webSched', `Scheduled ${scheduled} web notification timer(s) for ${medicines.length} meds / ${schedules.length} schedules`);
 }
 
 // Define notification actions for dose reminders
@@ -172,7 +192,10 @@ export async function scheduleLocalNotifications(
   medicines: Medicine[],
   schedules: Schedule[],
 ) {
-  if (Platform.OS === 'web') return;
+  if (Platform.OS === 'web') {
+    appendLog('info', 'localNotif', 'Skipped on web platform');
+    return;
+  }
 
   // Preserve snooze reminders — only cancel scheduled dose notifications
   const existing = await Notifications.getAllScheduledNotificationsAsync();

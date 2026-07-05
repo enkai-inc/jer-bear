@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { Medicine, Schedule, DoseEvent, UpcomingDose } from '../types';
 import * as api from '../services/api';
+import { appendLog } from '../services/logger';
 
 interface AppState {
   // Data
@@ -58,20 +59,25 @@ export const useStore = create<AppState>((set, get) => ({
 
   loadAll: async () => {
     set({ loading: true, error: null });
+    appendLog('info', 'store', 'loadAll: fetching data...');
     try {
       const [medicines, schedules, doseEvents] = await Promise.all([
         api.fetchMedicines(),
         api.fetchSchedules(),
         api.fetchDoseEvents(),
       ]);
+      appendLog('info', 'store', `loadAll: ${medicines.length} meds, ${schedules.length} schedules, ${doseEvents.length} events`);
       set({ medicines, schedules, doseEvents, loading: false });
     } catch (err) {
+      appendLog('error', 'store', `loadAll failed: ${(err as Error).message}`);
       set({ error: (err as Error).message, loading: false });
     }
   },
 
   addMedicine: async (data) => {
+    appendLog('info', 'store', `addMedicine: ${data.name} ${data.strength}`);
     const medicine = await api.createMedicine(data);
+    appendLog('info', 'store', `addMedicine success: id=${medicine.medicineId}`);
     set(s => ({ medicines: [...s.medicines, medicine] }));
     return medicine;
   },
@@ -104,7 +110,9 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   addSchedule: async (data) => {
+    appendLog('info', 'store', `addSchedule: type=${data.type} times=${data.times?.join(',')} interval=${data.intervalHours}`);
     const schedule = await api.createSchedule(data);
+    appendLog('info', 'store', `addSchedule success: id=${schedule.scheduleId}`);
     set(s => ({ schedules: [...s.schedules, schedule] }));
     return schedule;
   },
@@ -151,6 +159,7 @@ export const useStore = create<AppState>((set, get) => ({
     const now = new Date();
     const today = now.getDay(); // 0=Sun..6=Sat
     const upcoming: UpcomingDose[] = [];
+    const OVERDUE_GRACE_MS = 5 * 60 * 1000; // Keep overdue doses visible for 5 minutes
 
     // Build a set of recently handled dose keys (scheduleId + hour:minute)
     // to filter out doses already taken/dismissed today
@@ -191,9 +200,14 @@ export const useStore = create<AppState>((set, get) => ({
           const key = `${schedule.scheduleId}-${h}:${m}`;
           if (handledKeys.has(key) && scheduledTime <= now) continue;
 
-          // If time has passed today, schedule for tomorrow
           if (scheduledTime < now) {
-            scheduledTime.setDate(scheduledTime.getDate() + 1);
+            // Keep overdue doses visible within grace period so alerts can fire
+            const overdueMs = now.getTime() - scheduledTime.getTime();
+            if (overdueMs > OVERDUE_GRACE_MS) {
+              // Past grace period — show as tomorrow
+              scheduledTime.setDate(scheduledTime.getDate() + 1);
+            }
+            // else: keep as today's time (overdue but within grace window)
           }
 
           upcoming.push({ medicine, schedule, scheduledTime });
@@ -213,6 +227,14 @@ export const useStore = create<AppState>((set, get) => ({
         // Step forward from creation time to find the next upcoming dose
         while (anchor < now) {
           anchor = new Date(anchor.getTime() + intervalMs);
+        }
+
+        // Also check if the most recent past interval is within grace period
+        const prevAnchor = new Date(anchor.getTime() - intervalMs);
+        const prevOverdueMs = now.getTime() - prevAnchor.getTime();
+        const prevKey = `${schedule.scheduleId}-${prevAnchor.getHours()}:${prevAnchor.getMinutes()}`;
+        if (prevOverdueMs <= OVERDUE_GRACE_MS && !handledKeys.has(prevKey)) {
+          upcoming.push({ medicine, schedule, scheduledTime: prevAnchor });
         }
 
         // Check if this dose was already handled

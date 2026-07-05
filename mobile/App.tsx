@@ -16,6 +16,7 @@ import {
   scheduleWebNotifications,
 } from './src/services/notifications';
 import * as api from './src/services/api';
+import { appendLog } from './src/services/logger';
 
 const DEVICE_ID_KEY = '@jer_bear_device_id';
 
@@ -33,12 +34,17 @@ export default function App() {
 
   useEffect(() => {
     async function init() {
+      appendLog('info', 'app', `Init starting — platform: ${Platform.OS}`);
       const deviceId = await getOrCreateDeviceId();
       setDeviceId(deviceId);
+      appendLog('info', 'app', `Device ID: ${deviceId}`);
 
       await setupNotificationCategories();
-      await requestWebNotificationPermission();
+      const webGranted = await requestWebNotificationPermission();
+      appendLog('info', 'app', `Web notification permission: ${webGranted}`);
       const pushToken = await registerForPushNotifications();
+      appendLog('info', 'app', `Push token: ${pushToken ?? 'none (web or simulator)'}`);
+
 
       try {
         await api.registerDevice({
@@ -109,6 +115,7 @@ export default function App() {
 
   // Re-schedule notifications whenever medicines or schedules change
   useEffect(() => {
+    appendLog('info', 'app', `Medicines/schedules changed: ${medicines.length} meds, ${schedules.length} schedules`);
     if (medicines.length > 0 || schedules.length > 0) {
       scheduleLocalNotifications(medicines, schedules);
       scheduleWebNotifications(medicines, schedules);

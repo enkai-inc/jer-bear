@@ -15,6 +15,7 @@ import { DoseAlertModal } from '../components/DoseAlertModal';
 import { useStore } from '../store';
 import { UpcomingDose } from '../types';
 import { sendWebNotification } from '../services/notifications';
+import { appendLog } from '../services/logger';
 
 export function HomeScreen() {
   const {
@@ -44,12 +45,17 @@ export function HomeScreen() {
       setTick(t => t + 1); // also refreshes "In X min" labels
       const doses = getUpcomingDoses();
       const now = new Date();
+      appendLog('info', 'alertCheck', `Checking ${doses.length} upcoming dose(s) at ${now.toLocaleTimeString()}`);
       for (const dose of doses) {
         const diffMs = dose.scheduledTime.getTime() - now.getTime();
-        // Dose is due (within 1 minute window)
-        if (diffMs <= 0 && diffMs > -60000) {
+        const diffMins = Math.round(diffMs / 60000);
+        appendLog('info', 'alertCheck', `  ${dose.medicine.name} @ ${dose.scheduledTime.toLocaleTimeString()} — diff: ${diffMins}m (${diffMs}ms)`);
+
+        // Dose is due (within 5 minute overdue window)
+        if (diffMs <= 0 && diffMs > -300000) {
           const key = `${dose.schedule.scheduleId}-${dose.scheduledTime.getTime()}`;
           if (!alertedDoses.current.has(key)) {
+            appendLog('info', 'alertCheck', `  → ALERT TRIGGERED for ${dose.medicine.name}`);
             alertedDoses.current.add(key);
             setAlertDose(dose);
             const qty = dose.medicine.quantity !== 1 ? `${dose.medicine.quantity} x ` : '';
@@ -58,11 +64,13 @@ export function HomeScreen() {
               `Take ${qty}${dose.medicine.strength} (${dose.medicine.form})`,
             );
             break; // one alert at a time
+          } else {
+            appendLog('info', 'alertCheck', `  → Already alerted (key: ${key})`);
           }
         }
       }
     }
-    const timer = setInterval(checkDueDoses, 30000);
+    const timer = setInterval(checkDueDoses, 15000); // check every 15 seconds
     checkDueDoses(); // check immediately
     return () => clearInterval(timer);
   }, [medicines, schedules, doseEvents]);

@@ -9,4 +9,5 @@ export type RootTabParamList = {
   Medicines: undefined;
   History: undefined;
   Caregiver: undefined;
+  Debug: undefined;
 };
