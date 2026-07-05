@@ -10,6 +10,7 @@ import { MedicinesScreen } from '../screens/MedicinesScreen';
 import { AddMedicineScreen } from '../screens/AddMedicineScreen';
 import { HistoryScreen } from '../screens/HistoryScreen';
 import { CaregiverScreen } from '../screens/CaregiverScreen';
+import { DebugScreen } from '../screens/DebugScreen';
 
 import { RootTabParamList, MedicinesStackParamList } from './types';
 
@@ -38,6 +39,7 @@ export function AppNavigator() {
             else if (route.name === 'Medicines') iconName = 'medical';
             else if (route.name === 'History') iconName = 'time';
             else if (route.name === 'Caregiver') iconName = 'people';
+            else if (route.name === 'Debug') iconName = 'bug';
             return <Ionicons name={iconName} size={size} color={color} />;
           },
           tabBarActiveTintColor: colors.primary,
@@ -57,6 +59,7 @@ export function AppNavigator() {
         <Tab.Screen name="Medicines" component={MedicinesStack} />
         <Tab.Screen name="History" component={HistoryScreen} />
         <Tab.Screen name="Caregiver" component={CaregiverScreen} />
+        <Tab.Screen name="Debug" component={DebugScreen} />
       </Tab.Navigator>
     </NavigationContainer>
   );
