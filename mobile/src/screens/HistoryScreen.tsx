@@ -8,7 +8,9 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, spacing, borderRadius } from '../theme';
+import { colors, spacing, borderRadius, withAlpha } from '../theme';
+import { EmptyState } from '../components/EmptyState';
+import { ScreenTitle } from '../components/ScreenTitle';
 import { useStore } from '../store';
 import { DoseEvent } from '../types';
 
@@ -25,7 +27,9 @@ const ACTION_CONFIG = {
 };
 
 export function HistoryScreen() {
-  const { doseEvents, medicines, loadAll } = useStore();
+  const doseEvents = useStore(s => s.doseEvents);
+  const medicines = useStore(s => s.medicines);
+  const loadAll = useStore(s => s.loadAll);
   const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
@@ -63,16 +67,14 @@ export function HistoryScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <Text style={styles.title}>History</Text>
+      <ScreenTitle style={styles.title}>History</ScreenTitle>
 
       {sections.length === 0 ? (
-        <View style={styles.empty}>
-          <Text style={styles.emptyIcon}>📋</Text>
-          <Text style={styles.emptyTitle}>No dose history yet</Text>
-          <Text style={styles.emptyText}>
-            Your dose records will appear here
-          </Text>
-        </View>
+        <EmptyState
+          icon="📋"
+          title="No dose history yet"
+          text="Your dose records will appear here"
+        />
       ) : (
         <SectionList
           sections={sections}
@@ -93,7 +95,7 @@ export function HistoryScreen() {
 
             return (
               <View style={styles.eventCard}>
-                <View style={[styles.actionIcon, { backgroundColor: config.color + '20' }]}>
+                <View style={[styles.actionIcon, { backgroundColor: withAlpha(config.color, 0.12) }]}>
                   <Ionicons name={config.icon} size={20} color={config.color} />
                 </View>
                 <View style={styles.eventInfo}>
@@ -118,35 +120,10 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   title: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: colors.text,
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
   },
   list: {
     padding: spacing.md,
-  },
-  empty: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: spacing.xl,
-  },
-  emptyIcon: {
-    fontSize: 64,
-    marginBottom: spacing.md,
-  },
-  emptyTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: colors.text,
-    marginBottom: spacing.sm,
-  },
-  emptyText: {
-    fontSize: 15,
-    color: colors.textSecondary,
-    textAlign: 'center',
   },
   sectionHeader: {
     fontSize: 16,

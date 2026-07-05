@@ -23,13 +23,11 @@
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "4.25.2",
     "react-native-web": "^0.21.2",
-    "uuid": "^14.0.0",
     "zustand": "^5.0.14"
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",
     "@types/react": "~19.2.2",
-    "@types/uuid": "^10.0.0",
     "jest-expo": "^56.0.5",
     "typescript": "~6.0.3"
   },

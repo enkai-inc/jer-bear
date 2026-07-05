@@ -1,15 +1,24 @@
-import { SNSClient, PublishCommand } from '@aws-sdk/client-sns';
-import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, ScanCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
+import { ScanCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
+import * as db from './db';
+import { DEFAULT_TIMEZONE } from './constants';
+import { Schedule } from './types';
 
-const snsClient = new SNSClient({});
-const ddbClient = DynamoDBDocumentClient.from(new DynamoDBClient({}));
-
-const SCHEDULES_TABLE = process.env.SCHEDULES_TABLE!;
 const DOSE_EVENTS_TABLE = process.env.DOSE_EVENTS_TABLE!;
 const DEVICES_TABLE = process.env.DEVICES_TABLE!;
-const MEDICINES_TABLE = process.env.MEDICINES_TABLE!;
-const PUSH_TOPIC_ARN = process.env.PUSH_TOPIC_ARN!;
+
+// Expo push service endpoint — stored tokens are Expo push tokens, so
+// delivery goes through Expo's API rather than SNS platform applications.
+const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
+
+interface ExpoPushMessage {
+  to: string;
+  title: string;
+  body: string;
+  data: Record<string, string>;
+  sound: string;
+  priority: string;
+  categoryId: string;
+}
 
 /**
  * Runs every minute via EventBridge.
@@ -19,61 +28,57 @@ const PUSH_TOPIC_ARN = process.env.PUSH_TOPIC_ARN!;
 export async function handler() {
   const now = new Date();
 
-  // Scan all devices (for a single-user app this is fine; would paginate for multi-user)
-  const devicesResult = await ddbClient.send(new ScanCommand({
+  // Scan all devices. NOTE: Scan returns at most 1MB per page and we do not
+  // follow LastEvaluatedKey — acceptable at the current single-user scale.
+  const devicesResult = await db.docClient.send(new ScanCommand({
     TableName: DEVICES_TABLE,
   }));
   const devices = devicesResult.Items ?? [];
+
+  const messages: ExpoPushMessage[] = [];
 
   for (const device of devices) {
     if (!device.pushToken) continue;
 
     const deviceId = device.deviceId as string;
+    const timezone = (device.timezone as string) || DEFAULT_TIMEZONE;
 
-    // Get active schedules
-    const schedulesResult = await ddbClient.send(new QueryCommand({
-      TableName: SCHEDULES_TABLE,
-      KeyConditionExpression: 'deviceId = :d',
-      ExpressionAttributeValues: { ':d': deviceId },
-    }));
-    const schedules = (schedulesResult.Items ?? []).filter(s => s.status === 'active');
+    const schedules = (await db.getSchedules(deviceId)).filter(s => s.status === 'active');
 
     for (const schedule of schedules) {
-      const isDue = isScheduleDue(schedule, now, device.timezone as string || 'America/New_York');
-      if (!isDue) continue;
+      if (!isScheduleDue(schedule, now, timezone)) continue;
 
       // Check if there's already a dose event for this time window
-      const alreadyHandled = await hasDoseEventInWindow(deviceId, schedule.scheduleId as string, now);
+      const alreadyHandled = await hasDoseEventInWindow(deviceId, schedule.scheduleId, now);
       if (alreadyHandled) continue;
 
       // Get medicine name for notification
-      const medicineResult = await ddbClient.send(new QueryCommand({
-        TableName: MEDICINES_TABLE,
-        KeyConditionExpression: 'deviceId = :d AND medicineId = :m',
-        ExpressionAttributeValues: { ':d': deviceId, ':m': schedule.medicineId },
-      }));
-      const medicine = medicineResult.Items?.[0];
+      const medicine = await db.getMedicine(deviceId, schedule.medicineId);
       if (!medicine || medicine.status !== 'active') continue;
 
-      // Send push notification
-      const qty = medicine.quantity as number;
-      const qtyStr = qty === 1 ? '' : `${qty} x `;
-      await sendPushNotification(
-        device.pushToken as string,
-        device.platform as string,
-        medicine.name as string,
-        `Time to take ${qtyStr}${medicine.strength} (${medicine.form})`,
-        {
-          medicineId: schedule.medicineId as string,
-          scheduleId: schedule.scheduleId as string,
+      const qtyStr = medicine.quantity === 1 ? '' : `${medicine.quantity} x `;
+      messages.push({
+        to: device.pushToken as string,
+        title: `🧸 ${medicine.name}`,
+        body: `Time to take ${qtyStr}${medicine.strength} (${medicine.form})`,
+        data: {
+          medicineId: schedule.medicineId,
+          scheduleId: schedule.scheduleId,
           scheduledTime: now.toISOString(),
-        }
-      );
+        },
+        sound: 'default',
+        priority: 'high',
+        categoryId: 'DOSE_REMINDER',
+      });
     }
+  }
+
+  if (messages.length > 0) {
+    await sendExpoPush(messages);
   }
 }
 
-function getLocalTimeParts(now: Date, timezone: string): { hour: number; minute: number; day: number } {
+export function getLocalTimeParts(now: Date, timezone: string): { hour: number; minute: number; day: number } {
   // Use Intl.DateTimeFormat for reliable timezone conversion
   const formatter = new Intl.DateTimeFormat('en-US', {
     timeZone: timezone,
@@ -94,17 +99,17 @@ function getLocalTimeParts(now: Date, timezone: string): { hour: number; minute:
   return { hour, minute, day };
 }
 
-function isScheduleDue(schedule: Record<string, unknown>, now: Date, timezone: string): boolean {
+export function isScheduleDue(schedule: Schedule, now: Date, timezone: string): boolean {
   const { hour: currentHour, minute: currentMinute, day: currentDay } = getLocalTimeParts(now, timezone);
 
   // Check day-of-week filter
-  const daysOfWeek = schedule.daysOfWeek as number[] | undefined;
+  const daysOfWeek = schedule.daysOfWeek;
   if (daysOfWeek && daysOfWeek.length > 0 && !daysOfWeek.includes(currentDay)) {
     return false;
   }
 
   if (schedule.type === 'absolute') {
-    const times = schedule.times as string[] | undefined;
+    const times = schedule.times;
     if (!times) return false;
 
     return times.some(time => {
@@ -117,36 +122,29 @@ function isScheduleDue(schedule: Record<string, unknown>, now: Date, timezone: s
   }
 
   if (schedule.type === 'interval') {
-    const intervalHours = schedule.intervalHours as number | undefined;
+    const intervalHours = schedule.intervalHours;
     if (!intervalHours || intervalHours <= 0) return false;
 
-    // Anchor interval to schedule creation time
-    const createdAt = schedule.createdAt as string | undefined;
-    if (createdAt) {
-      const created = new Date(createdAt);
-      const diffMs = now.getTime() - created.getTime();
-      const intervalMs = intervalHours * 3600 * 1000;
-      const remainder = diffMs % intervalMs;
-      // Fire if within 1-minute window of an interval boundary
-      return remainder < 60000 || remainder > (intervalMs - 60000);
-    }
-
-    // Fallback: modulo from midnight (legacy behavior)
-    const minutesSinceMidnight = currentHour * 60 + currentMinute;
-    const intervalMinutes = Math.round(intervalHours * 60);
-    if (intervalMinutes <= 0) return false;
-    return minutesSinceMidnight % intervalMinutes === 0;
+    // Interval schedules are anchored to createdAt (UTC modulo math) — the
+    // same contract as mobile/src/services/doseSchedule.ts. Keep them in sync.
+    const created = new Date(schedule.createdAt);
+    if (isNaN(created.getTime())) return false;
+    const diffMs = now.getTime() - created.getTime();
+    const intervalMs = intervalHours * 3600 * 1000;
+    const remainder = diffMs % intervalMs;
+    // Fire if within 1-minute window of an interval boundary
+    return remainder < 60000 || remainder > (intervalMs - 60000);
   }
 
   return false;
 }
 
-async function hasDoseEventInWindow(deviceId: string, scheduleId: string, now: Date): Promise<boolean> {
+export async function hasDoseEventInWindow(deviceId: string, scheduleId: string, now: Date): Promise<boolean> {
   // Check for dose events in the last 30 minutes to avoid duplicate notifications
   // (wider window handles cases where user took dose early, anticipating reminder)
   const windowStart = new Date(now.getTime() - 30 * 60 * 1000).toISOString();
 
-  const result = await ddbClient.send(new QueryCommand({
+  const result = await db.docClient.send(new QueryCommand({
     TableName: DOSE_EVENTS_TABLE,
     IndexName: 'byTimestamp',
     KeyConditionExpression: 'deviceId = :d AND #ts >= :start',
@@ -162,49 +160,44 @@ async function hasDoseEventInWindow(deviceId: string, scheduleId: string, now: D
   return (result.Items?.length ?? 0) > 0;
 }
 
-async function sendPushNotification(
-  pushToken: string,
-  platform: string,
-  title: string,
-  body: string,
-  data: Record<string, string>,
-) {
-  const message: Record<string, unknown> = {};
+/**
+ * Expo push tokens are bearer credentials — never write them to CloudWatch.
+ * Expo error responses echo the offending token verbatim, so redact it before
+ * logging.
+ */
+function redactPushTokens(text: string): string {
+  return text.replace(/ExponentPushToken\[[^\]]*\]/g, 'ExponentPushToken[REDACTED]');
+}
 
-  if (platform === 'ios') {
-    message.APNS = JSON.stringify({
-      aps: {
-        alert: { title: `🧸 ${title}`, body },
-        sound: 'default',
-        badge: 1,
-        'content-available': 1,
-        'mutable-content': 1,
-        category: 'DOSE_REMINDER',
+async function sendExpoPush(messages: ExpoPushMessage[]): Promise<void> {
+  try {
+    const res = await fetch(EXPO_PUSH_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
       },
-      data,
+      // Expo accepts up to 100 messages per request — far above current scale.
+      body: JSON.stringify(messages),
     });
-  } else {
-    message.GCM = JSON.stringify({
-      notification: { title: `🧸 ${title}`, body },
-      data,
-      priority: 'high',
+
+    if (!res.ok) {
+      console.error(`Expo push request failed: ${res.status} ${redactPushTokens(await res.text())}`);
+      return;
+    }
+
+    const result = await res.json() as {
+      data?: Array<{ status: string; message?: string; details?: { error?: string } }>;
+    };
+    (result.data ?? []).forEach((ticket, i) => {
+      if (ticket.status !== 'ok') {
+        console.error(
+          `Expo push ticket ${i} error:`,
+          ticket.details?.error ?? redactPushTokens(ticket.message ?? 'unknown'),
+        );
+      }
     });
+  } catch (err) {
+    console.error('Expo push request failed:', err);
   }
-
-  // For Expo push notifications, use Expo's push service format
-  message.default = JSON.stringify({
-    to: pushToken,
-    title: `🧸 ${title}`,
-    body,
-    data,
-    sound: 'default',
-    priority: 'high',
-    categoryId: 'DOSE_REMINDER',
-  });
-
-  await snsClient.send(new PublishCommand({
-    TopicArn: PUSH_TOPIC_ARN,
-    Message: JSON.stringify(message),
-    MessageStructure: 'json',
-  }));
 }

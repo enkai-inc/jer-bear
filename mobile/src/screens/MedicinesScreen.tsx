@@ -1,44 +1,66 @@
-import React, { useState } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   FlatList,
   TouchableOpacity,
-  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MedicinesStackParamList } from '../navigation/types';
-import { colors, spacing, borderRadius } from '../theme';
+import { colors, spacing } from '../theme';
 import { MedicineCard } from '../components/MedicineCard';
+import { EmptyState } from '../components/EmptyState';
+import { ScreenTitle } from '../components/ScreenTitle';
+import { showConfirm } from '../utils/alert';
 import { useStore } from '../store';
+import { Schedule } from '../types';
+
+const EMPTY_SCHEDULES: Schedule[] = [];
 
 export function MedicinesScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<MedicinesStackParamList>>();
-  const { medicines, schedules, removeMedicine, toggleMedicinePause } = useStore();
+  const medicines = useStore(s => s.medicines);
+  const schedules = useStore(s => s.schedules);
+  const removeMedicine = useStore(s => s.removeMedicine);
+  const toggleMedicinePause = useStore(s => s.toggleMedicinePause);
 
-  function handleDelete(medicineId: string, name: string) {
-    Alert.alert(
+  // Group once so each card gets a stable array of only its own schedules
+  // (keeps MedicineCard's React.memo effective)
+  const schedulesByMedicine = useMemo(() => {
+    const groups: Record<string, Schedule[]> = {};
+    for (const schedule of schedules) {
+      (groups[schedule.medicineId] ??= []).push(schedule);
+    }
+    return groups;
+  }, [schedules]);
+
+  const handleDelete = useCallback((medicineId: string, name: string) => {
+    showConfirm(
       'Remove Medicine',
       `Are you sure you want to remove ${name}? This will also delete its schedules.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Remove',
-          style: 'destructive',
-          onPress: () => removeMedicine(medicineId),
-        },
-      ],
+      () => {
+        // Failure is surfaced via store.error (withErrorHandling rethrows)
+        removeMedicine(medicineId).catch(() => {});
+      },
+      'Remove',
     );
-  }
+  }, [removeMedicine]);
+
+  const handleEdit = useCallback((medicineId: string) => {
+    navigation.navigate('EditMedicine', { medicineId });
+  }, [navigation]);
+
+  const handleTogglePause = useCallback((medicineId: string) => {
+    toggleMedicinePause(medicineId).catch(() => {});
+  }, [toggleMedicinePause]);
 
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Medicines</Text>
+        <ScreenTitle>Medicines</ScreenTitle>
         <TouchableOpacity
           style={styles.addButton}
           onPress={() => navigation.navigate('AddMedicine')}
@@ -50,13 +72,11 @@ export function MedicinesScreen() {
       </View>
 
       {medicines.length === 0 ? (
-        <View style={styles.empty}>
-          <Text style={styles.emptyIcon}>💊</Text>
-          <Text style={styles.emptyTitle}>No medicines yet</Text>
-          <Text style={styles.emptyText}>
-            Tap the + button to add your first medicine
-          </Text>
-        </View>
+        <EmptyState
+          icon="💊"
+          title="No medicines yet"
+          text="Tap the + button to add your first medicine"
+        />
       ) : (
         <FlatList
           data={medicines}
@@ -68,13 +88,10 @@ export function MedicinesScreen() {
           renderItem={({ item }) => (
             <MedicineCard
               medicine={item}
-              schedules={schedules}
-              onPress={() =>
-                navigation.navigate('EditMedicine', {
-                  medicineId: item.medicineId,
-                })
-              }
-              onTogglePause={() => toggleMedicinePause(item.medicineId)}
+              schedules={schedulesByMedicine[item.medicineId] ?? EMPTY_SCHEDULES}
+              onPress={handleEdit}
+              onTogglePause={handleTogglePause}
+              onDelete={handleDelete}
             />
           )}
         />
@@ -93,12 +110,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: colors.text,
   },
   addButton: {
     width: 44,
@@ -115,26 +126,5 @@ const styles = StyleSheet.create({
   },
   list: {
     padding: spacing.md,
-  },
-  empty: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: spacing.xl,
-  },
-  emptyIcon: {
-    fontSize: 64,
-    marginBottom: spacing.md,
-  },
-  emptyTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: colors.text,
-    marginBottom: spacing.sm,
-  },
-  emptyText: {
-    fontSize: 15,
-    color: colors.textSecondary,
-    textAlign: 'center',
   },
 });

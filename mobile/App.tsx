@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { Platform } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -11,40 +11,60 @@ import {
   registerForPushNotifications,
   setupNotificationCategories,
   scheduleLocalNotifications,
-  scheduleSnooze,
   requestWebNotificationPermission,
   scheduleWebNotifications,
+  handleNotificationResponse,
 } from './src/services/notifications';
 import * as api from './src/services/api';
+import { DEVICE_ID_STORAGE_KEY } from './src/constants';
 import { appendLog } from './src/services/logger';
-
-const DEVICE_ID_KEY = '@jer_bear_device_id';
 
 // Generate or retrieve a stable device ID persisted across app launches
 async function getOrCreateDeviceId(): Promise<string> {
-  const existing = await AsyncStorage.getItem(DEVICE_ID_KEY);
+  const existing = await AsyncStorage.getItem(DEVICE_ID_STORAGE_KEY);
   if (existing) return existing;
   const id = Crypto.randomUUID();
-  await AsyncStorage.setItem(DEVICE_ID_KEY, id);
+  await AsyncStorage.setItem(DEVICE_ID_STORAGE_KEY, id);
   return id;
 }
 
 export default function App() {
-  const { setDeviceId, loadAll, medicines, schedules, recordDoseAction } = useStore();
+  // Scoped selectors — subscribing to the whole store would re-render the
+  // entire navigator tree on every store write
+  const medicines = useStore(s => s.medicines);
+  const schedules = useStore(s => s.schedules);
 
   useEffect(() => {
     async function init() {
+      const { setDeviceId, loadAll } = useStore.getState();
       appendLog('info', 'app', `Init starting — platform: ${Platform.OS}`);
       const deviceId = await getOrCreateDeviceId();
       setDeviceId(deviceId);
-      appendLog('info', 'app', `Device ID: ${deviceId}`);
+      // Never log the raw device ID — it is the de-facto credential
 
       await setupNotificationCategories();
-      const webGranted = await requestWebNotificationPermission();
-      appendLog('info', 'app', `Web notification permission: ${webGranted}`);
-      const pushToken = await registerForPushNotifications();
-      appendLog('info', 'app', `Push token: ${pushToken ?? 'none (web or simulator)'}`);
 
+      // Browsers suppress gesture-less permission prompts, so only record an
+      // already-granted state here; HomeScreen shows an "Enable reminders"
+      // banner that triggers the prompt on tap.
+      if (
+        Platform.OS === 'web' &&
+        typeof window !== 'undefined' &&
+        'Notification' in window &&
+        window.Notification.permission === 'granted'
+      ) {
+        await requestWebNotificationPermission();
+      }
+
+      // A push-registration failure must not skip device registration or the
+      // initial data load
+      let pushToken: string | null = null;
+      try {
+        pushToken = await registerForPushNotifications();
+      } catch (e) {
+        appendLog('error', 'app', `Push registration failed: ${(e as Error).message}`);
+      }
+      appendLog('info', 'app', `Push token: ${pushToken ? 'registered' : 'none (web or simulator)'}`);
 
       try {
         await api.registerDevice({
@@ -54,73 +74,54 @@ export default function App() {
           timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         });
       } catch (e) {
-        console.log('Device registration failed (offline?):', e);
+        appendLog('warn', 'app', `Device registration failed (offline?): ${(e as Error).message}`);
       }
 
       try {
         await loadAll();
       } catch (e) {
-        console.log('Initial load failed (offline?):', e);
+        appendLog('warn', 'app', `Initial load failed (offline?): ${(e as Error).message}`);
       }
     }
 
     init();
 
-    // Listen for notification responses (user tapped an action)
-    const responseSub = Notifications.addNotificationResponseReceivedListener(
-      async (response) => {
-        const { actionIdentifier } = response;
-        const data = response.notification.request.content.data as {
-          medicineId?: string;
-          scheduleId?: string;
-        };
-
-        if (!data.medicineId || !data.scheduleId) return;
-
-        if (actionIdentifier === 'TAKEN' || actionIdentifier === Notifications.DEFAULT_ACTION_IDENTIFIER) {
-          await recordDoseAction({
-            medicineId: data.medicineId,
-            scheduleId: data.scheduleId,
-            scheduledTime: new Date().toISOString(),
-            action: 'taken',
-          });
-        } else if (actionIdentifier === 'SNOOZE') {
-          const medicine = useStore.getState().medicines.find(
-            (m: any) => m.medicineId === data.medicineId,
-          );
-          if (medicine) {
-            await scheduleSnooze(medicine, data.scheduleId);
-          }
-          await recordDoseAction({
-            medicineId: data.medicineId,
-            scheduleId: data.scheduleId,
-            scheduledTime: new Date().toISOString(),
-            action: 'snoozed',
-          });
-        } else if (actionIdentifier === 'DISMISS') {
-          await recordDoseAction({
-            medicineId: data.medicineId,
-            scheduleId: data.scheduleId,
-            scheduledTime: new Date().toISOString(),
-            action: 'dismissed',
-          });
-        }
-      },
-    );
+    // Listen for notification responses (user tapped an action) — the only
+    // expo-notifications listener, not available on web
+    let responseSub: Notifications.EventSubscription | undefined;
+    if (Platform.OS !== 'web') {
+      responseSub = Notifications.addNotificationResponseReceivedListener(
+        handleNotificationResponse,
+      );
+    }
 
     return () => {
-      responseSub.remove();
+      responseSub?.remove();
     };
   }, []);
 
-  // Re-schedule notifications whenever medicines or schedules change
+  // Fingerprint of everything notification scheduling depends on — array
+  // identity changes on every pull-to-refresh, and rescheduling on identity
+  // alone would cancel/restart all timers and indefinitely postpone interval
+  // notifications
+  const scheduleFingerprint = useMemo(
+    () =>
+      JSON.stringify([
+        schedules.map(s => [s.scheduleId, s.status, s.times, s.intervalHours, s.daysOfWeek]),
+        medicines.map(m => [m.medicineId, m.status, m.name, m.strength, m.quantity, m.form, m.instructions]),
+      ]),
+    [medicines, schedules],
+  );
+
+  // Re-schedule notifications only when the schedule-relevant data changes
   useEffect(() => {
-    appendLog('info', 'app', `Medicines/schedules changed: ${medicines.length} meds, ${schedules.length} schedules`);
-    if (medicines.length > 0 || schedules.length > 0) {
-      scheduleLocalNotifications(medicines, schedules);
-      scheduleWebNotifications(medicines, schedules);
+    const { medicines: meds, schedules: scheds } = useStore.getState();
+    if (meds.length > 0 || scheds.length > 0) {
+      appendLog('info', 'app', `Schedule set changed: ${meds.length} meds, ${scheds.length} schedules — rescheduling`);
+      scheduleLocalNotifications(meds, scheds);
+      scheduleWebNotifications(meds, scheds);
     }
-  }, [medicines, schedules]);
+  }, [scheduleFingerprint]);
 
   return (
     <SafeAreaProvider>

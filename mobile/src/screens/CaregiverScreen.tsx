@@ -5,25 +5,38 @@ import {
   StyleSheet,
   TouchableOpacity,
   Share,
-  Alert,
+  Platform,
   TextInput,
   ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, borderRadius } from '../theme';
+import { ScreenTitle } from '../components/ScreenTitle';
 import { useStore } from '../store';
 import * as api from '../services/api';
-import { Medicine, DoseEvent } from '../types';
+import { showAlert } from '../utils/alert';
+import { formatDoseQuantity, formatSchedule } from '../utils/format';
+import { CAREGIVER_CODE_LENGTH } from '../constants';
+import { Medicine, Schedule, DoseEvent } from '../types';
+
+const ACTIVITY_CONFIG: Record<DoseEvent['action'], { icon: keyof typeof Ionicons.glyphMap; color: string }> = {
+  taken: { icon: 'checkmark-circle', color: colors.success },
+  missed: { icon: 'alert-circle', color: colors.danger },
+  dismissed: { icon: 'remove-circle', color: colors.textSecondary },
+  snoozed: { icon: 'remove-circle', color: colors.textSecondary },
+};
 
 export function CaregiverScreen() {
-  const { caregiverCode, generateCaregiverCode } = useStore();
+  const caregiverCode = useStore(s => s.caregiverCode);
+  const generateCaregiverCode = useStore(s => s.generateCaregiverCode);
   const [generating, setGenerating] = useState(false);
 
   // Caregiver lookup state
   const [lookupCode, setLookupCode] = useState('');
   const [caregiverData, setCaregiverData] = useState<{
     medicines: Medicine[];
+    schedules: Schedule[];
     recentDoses: DoseEvent[];
   } | null>(null);
   const [lookingUp, setLookingUp] = useState(false);
@@ -33,16 +46,25 @@ export function CaregiverScreen() {
     try {
       await generateCaregiverCode();
     } catch (err) {
-      Alert.alert('Error', (err as Error).message);
+      showAlert('Error', (err as Error).message);
     }
     setGenerating(false);
   }
 
   async function handleShare() {
     if (!caregiverCode) return;
-    await Share.share({
-      message: `Use code "${caregiverCode}" in the Jer-Bear app to view my medicine schedule.`,
-    });
+    const message = `Use code "${caregiverCode}" in the Jer-Bear app to view my medicine schedule.`;
+    try {
+      if (Platform.OS === 'web') {
+        // Share.share is unsupported on most browsers — copy instead
+        await navigator.clipboard.writeText(message);
+        showAlert('Copied!', 'The share message was copied to your clipboard.');
+        return;
+      }
+      await Share.share({ message });
+    } catch (err) {
+      showAlert('Error', 'Could not share the code. Please copy it manually.');
+    }
   }
 
   async function handleLookup() {
@@ -52,7 +74,7 @@ export function CaregiverScreen() {
       const data = await api.getCaregiverView(lookupCode.trim().toUpperCase());
       setCaregiverData(data);
     } catch (err) {
-      Alert.alert('Error', 'Invalid caregiver code');
+      showAlert('Error', 'Invalid caregiver code');
     }
     setLookingUp(false);
   }
@@ -60,7 +82,7 @@ export function CaregiverScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.scroll}>
-        <Text style={styles.title}>Caregiver</Text>
+        <ScreenTitle>Caregiver</ScreenTitle>
 
         {/* Share your code section */}
         <View style={styles.section}>
@@ -76,17 +98,24 @@ export function CaregiverScreen() {
             <View style={styles.codeCard}>
               <Text style={styles.codeLabel}>Your Code</Text>
               <Text style={styles.code}>{caregiverCode}</Text>
-              <TouchableOpacity style={styles.shareButton} onPress={handleShare} accessibilityRole="button">
+              <TouchableOpacity
+                style={styles.shareButton}
+                onPress={handleShare}
+                accessibilityRole="button"
+                accessibilityLabel="Share caregiver code"
+              >
                 <Ionicons name="share" size={18} color={colors.textLight} />
                 <Text style={styles.shareText}>Share Code</Text>
               </TouchableOpacity>
             </View>
           ) : (
             <TouchableOpacity
-              style={styles.generateButton}
+              style={[styles.generateButton, generating && styles.buttonDisabled]}
               onPress={handleGenerate}
               disabled={generating}
               accessibilityRole="button"
+              accessibilityLabel="Generate caregiver code"
+              accessibilityState={{ disabled: generating, busy: generating }}
             >
               <Text style={styles.generateText}>
                 {generating ? 'Generating...' : 'Generate Caregiver Code'}
@@ -113,13 +142,16 @@ export function CaregiverScreen() {
               placeholder="Enter code"
               placeholderTextColor={colors.paused}
               autoCapitalize="characters"
-              maxLength={6}
+              maxLength={CAREGIVER_CODE_LENGTH}
               accessibilityLabel="Caregiver code input"
             />
             <TouchableOpacity
-              style={styles.lookupButton}
+              style={[styles.lookupButton, lookingUp && styles.buttonDisabled]}
               onPress={handleLookup}
               disabled={lookingUp}
+              accessibilityRole="button"
+              accessibilityLabel="View patient's schedule"
+              accessibilityState={{ disabled: lookingUp, busy: lookingUp }}
             >
               <Text style={styles.lookupButtonText}>
                 {lookingUp ? '...' : 'View'}
@@ -132,19 +164,29 @@ export function CaregiverScreen() {
               <Text style={styles.viewTitle}>
                 Patient's Medicines ({caregiverData.medicines.length})
               </Text>
-              {caregiverData.medicines.map(med => (
-                <View key={med.medicineId} style={styles.medRow}>
-                  <Text style={styles.medDot}>
-                    {med.status === 'active' ? '🟢' : '⏸️'}
-                  </Text>
-                  <View>
-                    <Text style={styles.medName}>{med.name}</Text>
-                    <Text style={styles.medDosage}>
-                      {med.quantity !== 1 ? `${med.quantity}x ` : ''}{med.strength} ({med.form})
-                    </Text>
+              {caregiverData.medicines.map(med => {
+                const medSchedules = caregiverData.schedules.filter(
+                  s => s.medicineId === med.medicineId,
+                );
+                return (
+                  <View key={med.medicineId} style={styles.medRow}>
+                    <Ionicons
+                      name={med.status === 'active' ? 'ellipse' : 'pause-circle'}
+                      size={14}
+                      color={med.status === 'active' ? colors.success : colors.paused}
+                    />
+                    <View style={styles.medInfo}>
+                      <Text style={styles.medName}>{med.name}</Text>
+                      <Text style={styles.medDosage}>{formatDoseQuantity(med)}</Text>
+                      {medSchedules.length > 0 && (
+                        <Text style={styles.medSchedule}>
+                          {medSchedules.map(formatSchedule).join(' | ')}
+                        </Text>
+                      )}
+                    </View>
                   </View>
-                </View>
-              ))}
+                );
+              })}
 
               <Text style={[styles.viewTitle, { marginTop: spacing.md }]}>
                 Recent Activity
@@ -153,6 +195,7 @@ export function CaregiverScreen() {
                 const med = caregiverData.medicines.find(
                   m => m.medicineId === dose.medicineId,
                 );
+                const config = ACTIVITY_CONFIG[dose.action];
                 const time = new Date(dose.timestamp).toLocaleString([], {
                   month: 'short',
                   day: 'numeric',
@@ -161,9 +204,7 @@ export function CaregiverScreen() {
                 });
                 return (
                   <View key={dose.eventId} style={styles.activityRow}>
-                    <Text style={styles.activityAction}>
-                      {dose.action === 'taken' ? '✅' : dose.action === 'missed' ? '❌' : '➖'}
-                    </Text>
+                    <Ionicons name={config.icon} size={16} color={config.color} />
                     <Text style={styles.activityText}>
                       {med?.name || 'Unknown'} — {dose.action} at {time}
                     </Text>
@@ -186,12 +227,6 @@ const styles = StyleSheet.create({
   scroll: {
     padding: spacing.md,
     paddingBottom: spacing.xxl,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: colors.text,
-    marginBottom: spacing.md,
   },
   section: {
     backgroundColor: colors.surface,
@@ -242,6 +277,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
     paddingHorizontal: spacing.md,
     paddingVertical: 10,
+    minHeight: 44,
     borderRadius: borderRadius.md,
   },
   shareText: {
@@ -253,6 +289,9 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.md,
     paddingVertical: 14,
     alignItems: 'center',
+  },
+  buttonDisabled: {
+    backgroundColor: colors.paused,
   },
   generateText: {
     color: colors.textLight,
@@ -275,13 +314,14 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     color: colors.text,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.borderStrong,
   },
   lookupButton: {
     backgroundColor: colors.primary,
     borderRadius: borderRadius.md,
     paddingHorizontal: spacing.lg,
     justifyContent: 'center',
+    minHeight: 44,
   },
   lookupButtonText: {
     color: colors.textLight,
@@ -299,12 +339,12 @@ const styles = StyleSheet.create({
   },
   medRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: spacing.sm,
     paddingVertical: spacing.xs,
   },
-  medDot: {
-    fontSize: 14,
+  medInfo: {
+    flex: 1,
   },
   medName: {
     fontSize: 15,
@@ -315,14 +355,16 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.textSecondary,
   },
+  medSchedule: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
   activityRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
     paddingVertical: 4,
-  },
-  activityAction: {
-    fontSize: 14,
   },
   activityText: {
     fontSize: 13,

@@ -4,7 +4,6 @@ import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as lambdaNode from 'aws-cdk-lib/aws-lambda-nodejs';
 import * as apigateway from 'aws-cdk-lib/aws-apigateway';
-import * as sns from 'aws-cdk-lib/aws-sns';
 import * as events from 'aws-cdk-lib/aws-events';
 import * as targets from 'aws-cdk-lib/aws-events-targets';
 import * as iam from 'aws-cdk-lib/aws-iam';
@@ -21,6 +20,9 @@ export class JerBearStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
+    const domainName = 'jer-bear.digitaldevops.io';
+    const webOrigin = `https://${domainName}`;
+
     // ─── DynamoDB Tables ───────────────────────────────────────────
 
     const medicinesTable = new dynamodb.Table(this, 'Medicines', {
@@ -28,6 +30,8 @@ export class JerBearStack extends cdk.Stack {
       partitionKey: { name: 'deviceId', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'medicineId', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      encryption: dynamodb.TableEncryption.AWS_MANAGED,
+      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
 
@@ -36,6 +40,8 @@ export class JerBearStack extends cdk.Stack {
       partitionKey: { name: 'deviceId', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'scheduleId', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      encryption: dynamodb.TableEncryption.AWS_MANAGED,
+      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
 
@@ -51,6 +57,8 @@ export class JerBearStack extends cdk.Stack {
       partitionKey: { name: 'deviceId', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'eventId', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      encryption: dynamodb.TableEncryption.AWS_MANAGED,
+      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
 
@@ -72,6 +80,8 @@ export class JerBearStack extends cdk.Stack {
       tableName: 'jer-bear-devices',
       partitionKey: { name: 'deviceId', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      encryption: dynamodb.TableEncryption.AWS_MANAGED,
+      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
 
@@ -79,12 +89,6 @@ export class JerBearStack extends cdk.Stack {
     devicesTable.addGlobalSecondaryIndex({
       indexName: 'byCaregiverCode',
       partitionKey: { name: 'caregiverCode', type: dynamodb.AttributeType.STRING },
-    });
-
-    // ─── SNS Topic for Push Notifications ──────────────────────────
-
-    const pushTopic = new sns.Topic(this, 'PushNotifications', {
-      topicName: 'jer-bear-push-notifications',
     });
 
     // ─── Lambda Functions ──────────────────────────────────────────
@@ -96,7 +100,6 @@ export class JerBearStack extends cdk.Stack {
       SCHEDULES_TABLE: schedulesTable.tableName,
       DOSE_EVENTS_TABLE: doseEventsTable.tableName,
       DEVICES_TABLE: devicesTable.tableName,
-      PUSH_TOPIC_ARN: pushTopic.topicArn,
     };
 
     const apiHandler = new lambdaNode.NodejsFunction(this, 'ApiHandler', {
@@ -129,13 +132,10 @@ export class JerBearStack extends cdk.Stack {
       },
     });
 
-    // Grant table access
-    for (const fn of [apiHandler, notificationChecker]) {
-      medicinesTable.grantReadWriteData(fn);
-      schedulesTable.grantReadWriteData(fn);
-      doseEventsTable.grantReadWriteData(fn);
-      devicesTable.grantReadWriteData(fn);
-      pushTopic.grantPublish(fn);
+    // Grant table access (least privilege: the checker only reads)
+    for (const table of [medicinesTable, schedulesTable, doseEventsTable, devicesTable]) {
+      table.grantReadWriteData(apiHandler);
+      table.grantReadData(notificationChecker);
     }
 
     // ─── API Gateway ───────────────────────────────────────────────
@@ -143,8 +143,17 @@ export class JerBearStack extends cdk.Stack {
     const api = new apigateway.RestApi(this, 'JerBearApi', {
       restApiName: 'jer-bear-api',
       description: 'Jer-Bear Medicine Tracker API',
+      cloudWatchRole: true,
+      deployOptions: {
+        // Stage-level throttling: blunts caregiver-code brute force and
+        // PAY_PER_REQUEST cost DoS without a WAF.
+        throttlingRateLimit: 25,
+        throttlingBurstLimit: 50,
+        metricsEnabled: true,
+        loggingLevel: apigateway.MethodLoggingLevel.INFO,
+      },
       defaultCorsPreflightOptions: {
-        allowOrigins: apigateway.Cors.ALL_ORIGINS,
+        allowOrigins: [webOrigin, 'http://localhost:8081'],
         allowMethods: apigateway.Cors.ALL_METHODS,
         allowHeaders: ['Content-Type', 'X-Device-Id'],
       },
@@ -192,7 +201,6 @@ export class JerBearStack extends cdk.Stack {
 
     // ─── Static Web Hosting (jer-bear.digitaldevops.io) ──────────
 
-    const domainName = 'jer-bear.digitaldevops.io';
     const hostedZoneId = 'Z3OKT7D3Q3TASV';
     const certArn = 'arn:aws:acm:us-east-1:882384879235:certificate/411f9b4a-bc8f-4342-b7e6-52f39251fa3a';
 

@@ -3,61 +3,55 @@ import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, borderRadius } from '../theme';
 import { Medicine, Schedule } from '../types';
+import { formatDoseQuantity, formatSchedule } from '../utils/format';
 
 interface MedicineCardProps {
   medicine: Medicine;
+  /** Only this medicine's schedules — pass a stable, pre-grouped array so React.memo is effective. */
   schedules: Schedule[];
-  onPress: () => void;
-  onTogglePause: () => void;
+  onPress: (medicineId: string) => void;
+  onTogglePause: (medicineId: string) => void;
+  onDelete: (medicineId: string, name: string) => void;
 }
 
-export const MedicineCard = React.memo(function MedicineCard({ medicine, schedules, onPress, onTogglePause }: MedicineCardProps) {
+export const MedicineCard = React.memo(function MedicineCard({ medicine, schedules, onPress, onTogglePause, onDelete }: MedicineCardProps) {
   const isPaused = medicine.status === 'paused';
-  const activeSchedules = schedules.filter(s => s.medicineId === medicine.medicineId);
-
-  function formatSchedule(schedule: Schedule): string {
-    if (schedule.type === 'absolute' && schedule.times) {
-      return schedule.times.map(t => {
-        const parts = t.split(':');
-        const h = parseInt(parts[0], 10);
-        const m = parseInt(parts[1] || '0', 10);
-        if (isNaN(h) || isNaN(m)) return t; // show raw value if invalid
-        const ampm = h >= 12 ? 'PM' : 'AM';
-        const hour = h % 12 || 12;
-        return `${hour}:${m.toString().padStart(2, '0')} ${ampm}`;
-      }).join(', ');
-    }
-    if (schedule.type === 'interval' && schedule.intervalHours) {
-      return `Every ${schedule.intervalHours} hours`;
-    }
-    return '';
-  }
 
   return (
     <TouchableOpacity
       style={[styles.card, isPaused && styles.cardPaused]}
-      onPress={onPress}
+      onPress={() => onPress(medicine.medicineId)}
       activeOpacity={0.7}
       accessibilityLabel={`${medicine.name}, ${medicine.strength}, ${isPaused ? 'paused' : 'active'}`}
+      accessibilityRole="button"
+      accessibilityHint="Opens this medicine for editing"
     >
       <View style={styles.content}>
         <View style={styles.header}>
           <View style={styles.pill}>
-            <Text style={styles.pillEmoji}>💊</Text>
+            <Text style={styles.pillEmoji} accessible={false} importantForAccessibility="no">💊</Text>
           </View>
           <View style={styles.info}>
-            <Text style={[styles.name, isPaused && styles.textPaused]}>
-              {medicine.name}
-            </Text>
+            <View style={styles.nameRow}>
+              <Text style={[styles.name, isPaused && styles.textPaused]}>
+                {medicine.name}
+              </Text>
+              {isPaused && (
+                <View style={styles.pausedBadge}>
+                  <Text style={styles.pausedText}>PAUSED</Text>
+                </View>
+              )}
+            </View>
             <Text style={[styles.dosage, isPaused && styles.textPaused]}>
-              {medicine.quantity !== 1 ? `${medicine.quantity} x ` : ''}{medicine.strength} ({medicine.form})
+              {formatDoseQuantity(medicine)}
             </Text>
           </View>
           <TouchableOpacity
-            onPress={onTogglePause}
+            onPress={() => onTogglePause(medicine.medicineId)}
             style={styles.pauseButton}
             accessibilityLabel={isPaused ? 'Resume medicine' : 'Pause medicine'}
             accessibilityRole="button"
+            accessibilityState={{ selected: isPaused }}
           >
             <Ionicons
               name={isPaused ? 'play-circle' : 'pause-circle'}
@@ -65,13 +59,21 @@ export const MedicineCard = React.memo(function MedicineCard({ medicine, schedul
               color={isPaused ? colors.success : colors.paused}
             />
           </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => onDelete(medicine.medicineId, medicine.name)}
+            style={styles.deleteButton}
+            accessibilityLabel={`Remove ${medicine.name}`}
+            accessibilityRole="button"
+          >
+            <Ionicons name="trash-outline" size={24} color={colors.danger} />
+          </TouchableOpacity>
         </View>
 
-        {activeSchedules.length > 0 && (
+        {schedules.length > 0 && (
           <View style={styles.scheduleRow}>
             <Ionicons name="time-outline" size={14} color={colors.textSecondary} />
             <Text style={styles.scheduleText}>
-              {activeSchedules.map(formatSchedule).join(' | ')}
+              {schedules.map(formatSchedule).join(' | ')}
             </Text>
           </View>
         )}
@@ -81,12 +83,6 @@ export const MedicineCard = React.memo(function MedicineCard({ medicine, schedul
             {medicine.instructions}
           </Text>
         ) : null}
-
-        {isPaused && (
-          <View style={styles.pausedBadge}>
-            <Text style={styles.pausedText}>PAUSED</Text>
-          </View>
-        )}
       </View>
     </TouchableOpacity>
   );
@@ -104,10 +100,12 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 3,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.borderStrong, // interactive card — >=3:1 border per WCAG 1.4.11
   },
   cardPaused: {
-    opacity: 0.6,
+    // No opacity here — opacity-composited text fails WCAG AA contrast.
+    // Paused state is signaled by border, background, text color, and badge.
+    backgroundColor: colors.surfaceWarm,
     borderColor: colors.paused,
   },
   content: {
@@ -132,7 +130,13 @@ const styles = StyleSheet.create({
     flex: 1,
     marginLeft: spacing.sm,
   },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
   name: {
+    flexShrink: 1,
     fontSize: 17,
     fontWeight: '600',
     color: colors.text,
@@ -143,7 +147,14 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   pauseButton: {
-    padding: spacing.xs,
+    padding: spacing.sm, // 28pt icon + 2x8pt padding = 44pt touch target
+  },
+  deleteButton: {
+    padding: spacing.sm,
+    minWidth: 44,
+    minHeight: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   scheduleRow: {
     flexDirection: 'row',
@@ -163,9 +174,6 @@ const styles = StyleSheet.create({
     color: colors.paused,
   },
   pausedBadge: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
     backgroundColor: colors.paused,
     paddingHorizontal: 8,
     paddingVertical: 2,

@@ -1,4 +1,5 @@
 export interface LogEntry {
+  id: number;
   timestamp: string;
   level: 'info' | 'warn' | 'error';
   source: string;
@@ -8,9 +9,11 @@ export interface LogEntry {
 const MAX_ENTRIES = 200;
 const logs: LogEntry[] = [];
 const listeners = new Set<() => void>();
+let nextId = 1;
 
 export function appendLog(level: LogEntry['level'], source: string, message: string) {
   const entry: LogEntry = {
+    id: nextId++,
     timestamp: new Date().toISOString(),
     level,
     source,
@@ -22,7 +25,7 @@ export function appendLog(level: LogEntry['level'], source: string, message: str
 }
 
 export function getLogs(): LogEntry[] {
-  return logs;
+  return [...logs]; // copy — callers must not mutate the internal buffer
 }
 
 export function clearLogs() {

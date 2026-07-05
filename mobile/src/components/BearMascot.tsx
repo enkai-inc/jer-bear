@@ -14,7 +14,7 @@ export const BearMascot = React.memo(function BearMascot({ size = 'large', messa
   return (
     <View style={styles.container}>
       <View style={[styles.bearCircle, { width: bearSize, height: bearSize }]}>
-        <Text style={{ fontSize }}>🧸</Text>
+        <Text style={{ fontSize }} accessible={false} importantForAccessibility="no">🧸</Text>
       </View>
       {message && (
         <View style={styles.speechBubble}>
@@ -39,6 +39,8 @@ const styles = StyleSheet.create({
   },
   speechBubble: {
     backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border, // shadows don't render on web — keep a visible edge
     borderRadius: 16,
     paddingHorizontal: 16,
     paddingVertical: 10,

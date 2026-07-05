@@ -1,6 +1,8 @@
 import React from 'react';
-import { View, Text, StyleSheet, Modal, TouchableOpacity, Animated } from 'react-native';
+import { View, Text, StyleSheet, Modal, TouchableOpacity } from 'react-native';
 import { colors, spacing, borderRadius } from '../theme';
+import { SNOOZE_MINUTES } from '../constants';
+import { formatDoseQuantity } from '../utils/format';
 import { Medicine } from '../types';
 
 interface DoseAlertModalProps {
@@ -28,15 +30,13 @@ export const DoseAlertModal = React.memo(function DoseAlertModal({
   });
 
   return (
-    <Modal visible={visible} transparent animationType="slide">
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onDismiss}>
       <View style={styles.overlay}>
-        <View style={styles.modal}>
-          <Text style={styles.bearIcon}>🧸</Text>
+        <View style={styles.modal} accessibilityViewIsModal>
+          <Text style={styles.bearIcon} accessible={false} importantForAccessibility="no">🧸</Text>
           <Text style={styles.title}>Time for your medicine!</Text>
           <Text style={styles.medicineName}>{medicine.name}</Text>
-          <Text style={styles.dosage}>
-            {medicine.quantity !== 1 ? `${medicine.quantity} x ` : ''}{medicine.strength} ({medicine.form})
-          </Text>
+          <Text style={styles.dosage}>{formatDoseQuantity(medicine)}</Text>
           {medicine.instructions ? (
             <Text style={styles.instructions}>{medicine.instructions}</Text>
           ) : null}
@@ -57,9 +57,9 @@ export const DoseAlertModal = React.memo(function DoseAlertModal({
                 style={[styles.button, styles.snoozeButton]}
                 onPress={onSnooze}
                 accessibilityRole="button"
-                accessibilityLabel="Snooze for 5 minutes"
+                accessibilityLabel={`Snooze for ${SNOOZE_MINUTES} minutes`}
               >
-                <Text style={styles.snoozeText}>Snooze 5 min</Text>
+                <Text style={styles.snoozeText}>Snooze {SNOOZE_MINUTES} min</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -81,7 +81,7 @@ export const DoseAlertModal = React.memo(function DoseAlertModal({
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: colors.overlay,
     justifyContent: 'center',
     alignItems: 'center',
     padding: spacing.lg,
@@ -93,9 +93,9 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 340,
     alignItems: 'center',
-    shadowColor: '#000',
+    shadowColor: colors.shadow,
     shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.15,
+    shadowOpacity: 1,
     shadowRadius: 24,
     elevation: 10,
   },
@@ -169,7 +169,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.borderStrong,
   },
   dismissText: {
     color: colors.textSecondary,
