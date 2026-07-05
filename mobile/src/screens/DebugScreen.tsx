@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -9,8 +9,11 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, spacing, borderRadius } from '../theme';
+import { ScreenTitle } from '../components/ScreenTitle';
 import { useStore } from '../store';
 import { getLogs, clearLogs, subscribeLogs, LogEntry, appendLog } from '../services/logger';
+
+const LOG_REFRESH_DEBOUNCE_MS = 500;
 
 const LEVEL_COLORS = {
   info: colors.textSecondary,
@@ -19,15 +22,31 @@ const LEVEL_COLORS = {
 };
 
 export function DebugScreen() {
-  const { medicines, schedules, doseEvents, deviceId, getUpcomingDoses } = useStore();
+  const medicines = useStore(s => s.medicines);
+  const schedules = useStore(s => s.schedules);
+  const doseEvents = useStore(s => s.doseEvents);
+  const deviceId = useStore(s => s.deviceId);
+  const getUpcomingDoses = useStore(s => s.getUpcomingDoses);
   const [logs, setLogs] = useState<LogEntry[]>(getLogs);
   const [showState, setShowState] = useState(true);
 
   useEffect(() => {
-    return subscribeLogs(() => setLogs([...getLogs()]));
+    // Debounce log refreshes — appendLog can fire in bursts (e.g. alertCheck)
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const unsubscribe = subscribeLogs(() => {
+      if (timer) return;
+      timer = setTimeout(() => {
+        timer = null;
+        setLogs(getLogs());
+      }, LOG_REFRESH_DEBOUNCE_MS);
+    });
+    return () => {
+      if (timer) clearTimeout(timer);
+      unsubscribe();
+    };
   }, []);
 
-  const upcoming = getUpcomingDoses();
+  const upcoming = useMemo(() => getUpcomingDoses(), [medicines, schedules, doseEvents]);
   const now = new Date();
 
   const handleClear = useCallback(() => {
@@ -69,11 +88,13 @@ export function DebugScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <Text style={styles.title}>Debug Log</Text>
+      <ScreenTitle style={styles.title}>Debug Log</ScreenTitle>
 
       <TouchableOpacity
         style={styles.toggleButton}
         onPress={() => setShowState(s => !s)}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: showState }}
       >
         <Text style={styles.toggleText}>{showState ? 'Hide' : 'Show'} App State</Text>
       </TouchableOpacity>
@@ -82,7 +103,7 @@ export function DebugScreen() {
         <View style={styles.stateCard}>
           <Text style={styles.stateTitle}>App State</Text>
           <Text style={styles.stateLine}>Platform: {Platform.OS}</Text>
-          <Text style={styles.stateLine}>Device ID: {deviceId ?? 'not set'}</Text>
+          <Text style={styles.stateLine}>Device ID: {deviceId ? 'set' : 'not set'}</Text>
           <Text style={styles.stateLine}>Medicines: {medicines.length} ({medicines.filter(m => m.status === 'active').length} active)</Text>
           <Text style={styles.stateLine}>Schedules: {schedules.length} ({schedules.filter(s => s.status === 'active').length} active)</Text>
           <Text style={styles.stateLine}>Dose Events: {doseEvents.length}</Text>
@@ -126,10 +147,10 @@ export function DebugScreen() {
       <View style={styles.logHeader}>
         <Text style={styles.logHeaderText}>Event Log ({logs.length})</Text>
         <View style={styles.logActions}>
-          <TouchableOpacity style={styles.actionBtn} onPress={handleTestNotification}>
+          <TouchableOpacity style={styles.actionBtn} onPress={handleTestNotification} accessibilityRole="button">
             <Text style={styles.actionBtnText}>Test Notif</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.actionBtn, styles.clearBtn]} onPress={handleClear}>
+          <TouchableOpacity style={[styles.actionBtn, styles.clearBtn]} onPress={handleClear} accessibilityRole="button">
             <Text style={styles.actionBtnText}>Clear</Text>
           </TouchableOpacity>
         </View>
@@ -137,7 +158,7 @@ export function DebugScreen() {
 
       <FlatList
         data={logs}
-        keyExtractor={(_, i) => String(i)}
+        keyExtractor={(item) => String(item.id)}
         renderItem={renderLogItem}
         style={styles.logList}
         contentContainerStyle={styles.logListContent}
@@ -152,17 +173,15 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   title: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: colors.text,
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
   },
   toggleButton: {
     marginHorizontal: spacing.md,
     marginBottom: spacing.sm,
     paddingVertical: spacing.xs,
     paddingHorizontal: spacing.sm,
+    minHeight: 44,
+    justifyContent: 'center',
     backgroundColor: colors.surfaceWarm,
     borderRadius: borderRadius.sm,
     alignSelf: 'flex-start',
@@ -212,6 +231,8 @@ const styles = StyleSheet.create({
   actionBtn: {
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,
+    minHeight: 44,
+    justifyContent: 'center',
     backgroundColor: colors.primary,
     borderRadius: borderRadius.sm,
   },

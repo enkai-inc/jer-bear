@@ -5,11 +5,15 @@ import { APIGatewayProxyEvent } from 'aws-lambda';
 
 const mockDb = db as jest.Mocked<typeof db>;
 
+// Device IDs are UUID-shaped (mobile always sends Crypto.randomUUID()).
+const DEVICE_ID = '123e4567-e89b-42d3-a456-426614174000';
+const WEB_ORIGIN = 'https://jer-bear.digitaldevops.io';
+
 function makeEvent(overrides: Partial<APIGatewayProxyEvent> = {}): APIGatewayProxyEvent {
   return {
     resource: '/',
     httpMethod: 'GET',
-    headers: { 'X-Device-Id': 'test-device-123' },
+    headers: { 'X-Device-Id': DEVICE_ID },
     pathParameters: null,
     queryStringParameters: null,
     body: null,
@@ -17,17 +21,15 @@ function makeEvent(overrides: Partial<APIGatewayProxyEvent> = {}): APIGatewayPro
   } as APIGatewayProxyEvent;
 }
 
-const DEVICE_ID = 'test-device-123';
-
 const sampleMedicine = {
   deviceId: DEVICE_ID,
   medicineId: 'med-001',
   name: 'Aspirin',
   strength: '100mg',
   quantity: 1,
-  form: 'tablet',
+  form: 'tablet' as const,
   instructions: 'Take with food',
-  status: 'active',
+  status: 'active' as const,
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: '2026-01-01T00:00:00.000Z',
 };
@@ -36,11 +38,11 @@ const sampleSchedule = {
   deviceId: DEVICE_ID,
   scheduleId: 'sched-001',
   medicineId: 'med-001',
-  type: 'absolute',
+  type: 'absolute' as const,
   times: ['09:00'],
   intervalHours: null,
   daysOfWeek: [],
-  status: 'active',
+  status: 'active' as const,
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: '2026-01-01T00:00:00.000Z',
 };
@@ -52,13 +54,13 @@ const sampleDoseEvent = {
   scheduleId: 'sched-001',
   scheduledTime: '2026-01-01T09:00:00.000Z',
   timestamp: '2026-01-01T09:05:00.000Z',
-  action: 'taken',
+  action: 'taken' as const,
 };
 
 const sampleDevice = {
   deviceId: DEVICE_ID,
   pushToken: 'push-token-abc',
-  platform: 'ios',
+  platform: 'ios' as const,
   timezone: 'America/New_York',
   caregiverCode: 'ABC123',
   createdAt: '2026-01-01T00:00:00.000Z',
@@ -128,21 +130,77 @@ describe('POST /medicines', () => {
     expect(body.form).toBe('tablet');
   });
 
-  it('rejects empty name with 400', async () => {
-    // Validation will be added by another agent; this test ensures the
-    // eventual behaviour is covered. If validation is not yet present the
-    // response will be 201, which we accept gracefully here by checking
-    // either 400 or 201.
+  it('trims and length-limits instructions', async () => {
     mockDb.putMedicine.mockResolvedValue(undefined);
 
+    const res = await handler(makeEvent({
+      resource: '/medicines',
+      httpMethod: 'POST',
+      body: JSON.stringify({ name: 'Aspirin', strength: '100mg', instructions: `  ${'x'.repeat(600)}  ` }),
+    }));
+
+    expect(res.statusCode).toBe(201);
+    expect(JSON.parse(res.body).instructions).toHaveLength(500);
+  });
+
+  it('rejects empty name with 400', async () => {
     const res = await handler(makeEvent({
       resource: '/medicines',
       httpMethod: 'POST',
       body: JSON.stringify({ name: '', strength: '100mg' }),
     }));
 
-    // Accept 400 (validation present) or 201 (validation not yet added)
-    expect([400, 201]).toContain(res.statusCode);
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body)).toEqual({ error: 'Medicine name is required' });
+    expect(mockDb.putMedicine).not.toHaveBeenCalled();
+  });
+
+  it('rejects a name longer than 200 characters', async () => {
+    const res = await handler(makeEvent({
+      resource: '/medicines',
+      httpMethod: 'POST',
+      body: JSON.stringify({ name: 'a'.repeat(201), strength: '100mg' }),
+    }));
+
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body)).toEqual({ error: 'Medicine name too long' });
+    expect(mockDb.putMedicine).not.toHaveBeenCalled();
+  });
+
+  it('rejects missing strength', async () => {
+    const res = await handler(makeEvent({
+      resource: '/medicines',
+      httpMethod: 'POST',
+      body: JSON.stringify({ name: 'Aspirin' }),
+    }));
+
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body)).toEqual({ error: 'Strength is required' });
+    expect(mockDb.putMedicine).not.toHaveBeenCalled();
+  });
+
+  it.each([[0], [101], ['abc']])('rejects invalid quantity %p', async (quantity) => {
+    const res = await handler(makeEvent({
+      resource: '/medicines',
+      httpMethod: 'POST',
+      body: JSON.stringify({ name: 'Aspirin', strength: '100mg', quantity }),
+    }));
+
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body)).toEqual({ error: 'Quantity must be between 0 and 100' });
+    expect(mockDb.putMedicine).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unknown medicine form', async () => {
+    const res = await handler(makeEvent({
+      resource: '/medicines',
+      httpMethod: 'POST',
+      body: JSON.stringify({ name: 'Aspirin', strength: '100mg', form: 'potion' }),
+    }));
+
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body)).toEqual({ error: 'Invalid medicine form' });
+    expect(mockDb.putMedicine).not.toHaveBeenCalled();
   });
 });
 
@@ -207,6 +265,36 @@ describe('PUT /medicines/{medicineId}', () => {
     }));
 
     expect(res.statusCode).toBe(404);
+  });
+
+  it('rejects a status outside the allow-list', async () => {
+    mockDb.getMedicine.mockResolvedValue(sampleMedicine);
+
+    const res = await handler(makeEvent({
+      resource: '/medicines/{medicineId}',
+      httpMethod: 'PUT',
+      pathParameters: { medicineId: 'med-001' },
+      body: JSON.stringify({ status: 'garbage' }),
+    }));
+
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body)).toEqual({ error: 'Invalid status' });
+    expect(mockDb.putMedicine).not.toHaveBeenCalled();
+  });
+
+  it('validates present fields without requiring the rest (partial update)', async () => {
+    mockDb.getMedicine.mockResolvedValue(sampleMedicine);
+
+    const res = await handler(makeEvent({
+      resource: '/medicines/{medicineId}',
+      httpMethod: 'PUT',
+      pathParameters: { medicineId: 'med-001' },
+      body: JSON.stringify({ quantity: 101 }),
+    }));
+
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body)).toEqual({ error: 'Quantity must be between 0 and 100' });
+    expect(mockDb.putMedicine).not.toHaveBeenCalled();
   });
 });
 
@@ -312,8 +400,6 @@ describe('POST /schedules', () => {
   });
 
   it('rejects invalid schedule type with 400', async () => {
-    mockDb.putSchedule.mockResolvedValue(undefined);
-
     const res = await handler(makeEvent({
       resource: '/schedules',
       httpMethod: 'POST',
@@ -324,8 +410,230 @@ describe('POST /schedules', () => {
       }),
     }));
 
-    // Accept 400 (validation present) or 201 (validation not yet added)
-    expect([400, 201]).toContain(res.statusCode);
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body)).toEqual({ error: 'Invalid schedule type' });
+    expect(mockDb.putSchedule).not.toHaveBeenCalled();
+  });
+
+  it('rejects a missing medicineId', async () => {
+    const res = await handler(makeEvent({
+      resource: '/schedules',
+      httpMethod: 'POST',
+      body: JSON.stringify({ type: 'absolute', times: ['09:00'] }),
+    }));
+
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body)).toEqual({ error: 'medicineId is required' });
+    expect(mockDb.putSchedule).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [undefined, 'At least one time is required for absolute schedules'],
+    [[], 'At least one time is required for absolute schedules'],
+    [['25:00'], 'Time out of range: 25:00'],
+    [['9:60'], 'Time out of range: 9:60'],
+    [[900], 'Invalid time format: 900'],
+  ])('rejects absolute schedule with times %p', async (times, error) => {
+    const res = await handler(makeEvent({
+      resource: '/schedules',
+      httpMethod: 'POST',
+      body: JSON.stringify({ medicineId: 'med-001', type: 'absolute', times }),
+    }));
+
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body)).toEqual({ error });
+    expect(mockDb.putSchedule).not.toHaveBeenCalled();
+  });
+
+  it.each([[0], [169], ['abc']])('rejects interval schedule with intervalHours %p', async (intervalHours) => {
+    const res = await handler(makeEvent({
+      resource: '/schedules',
+      httpMethod: 'POST',
+      body: JSON.stringify({ medicineId: 'med-001', type: 'interval', intervalHours }),
+    }));
+
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body)).toEqual({ error: 'intervalHours must be between 0 and 168' });
+    expect(mockDb.putSchedule).not.toHaveBeenCalled();
+  });
+
+  it('rejects a non-array daysOfWeek', async () => {
+    const res = await handler(makeEvent({
+      resource: '/schedules',
+      httpMethod: 'POST',
+      body: JSON.stringify({ medicineId: 'med-001', type: 'absolute', times: ['09:00'], daysOfWeek: 'weekdays' }),
+    }));
+
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body)).toEqual({ error: 'daysOfWeek must be an array' });
+    expect(mockDb.putSchedule).not.toHaveBeenCalled();
+  });
+
+  it('rejects a day of week outside 0-6', async () => {
+    const res = await handler(makeEvent({
+      resource: '/schedules',
+      httpMethod: 'POST',
+      body: JSON.stringify({ medicineId: 'med-001', type: 'absolute', times: ['09:00'], daysOfWeek: [7] }),
+    }));
+
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body)).toEqual({ error: 'Invalid day of week' });
+    expect(mockDb.putSchedule).not.toHaveBeenCalled();
+  });
+});
+
+describe('PUT /schedules/{scheduleId}', () => {
+  it('updates an existing schedule', async () => {
+    mockDb.getSchedule.mockResolvedValue(sampleSchedule);
+    mockDb.putSchedule.mockResolvedValue(undefined);
+
+    const res = await handler(makeEvent({
+      resource: '/schedules/{scheduleId}',
+      httpMethod: 'PUT',
+      pathParameters: { scheduleId: 'sched-001' },
+      body: JSON.stringify({ times: ['08:00', '20:00'], status: 'paused' }),
+    }));
+
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.times).toEqual(['08:00', '20:00']);
+    expect(body.status).toBe('paused');
+    expect(body.scheduleId).toBe('sched-001');
+    expect(body.deviceId).toBe(DEVICE_ID);
+    expect(mockDb.getSchedule).toHaveBeenCalledWith(DEVICE_ID, 'sched-001');
+    expect(mockDb.putSchedule).toHaveBeenCalledTimes(1);
+  });
+
+  it('accepts the mobile interval payload with an empty times array', async () => {
+    // AddMedicineScreen always sends `times: []` for interval schedules —
+    // regression test for the partial validation rejecting the app's own payload.
+    mockDb.getSchedule.mockResolvedValue(sampleSchedule);
+    mockDb.putSchedule.mockResolvedValue(undefined);
+
+    const res = await handler(makeEvent({
+      resource: '/schedules/{scheduleId}',
+      httpMethod: 'PUT',
+      pathParameters: { scheduleId: 'sched-001' },
+      body: JSON.stringify({ type: 'interval', times: [], intervalHours: 6 }),
+    }));
+
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.type).toBe('interval');
+    expect(body.times).toEqual([]);
+    expect(body.intervalHours).toBe(6);
+    expect(mockDb.putSchedule).toHaveBeenCalledTimes(1);
+  });
+
+  it('accepts an empty times array when the stored schedule is interval and no type is sent', async () => {
+    mockDb.getSchedule.mockResolvedValue({
+      ...sampleSchedule,
+      type: 'interval' as const,
+      times: [],
+      intervalHours: 6,
+    });
+    mockDb.putSchedule.mockResolvedValue(undefined);
+
+    const res = await handler(makeEvent({
+      resource: '/schedules/{scheduleId}',
+      httpMethod: 'PUT',
+      pathParameters: { scheduleId: 'sched-001' },
+      body: JSON.stringify({ times: [] }),
+    }));
+
+    expect(res.statusCode).toBe(200);
+    expect(mockDb.putSchedule).toHaveBeenCalledTimes(1);
+  });
+
+  it('still rejects an empty times array for an absolute schedule', async () => {
+    mockDb.getSchedule.mockResolvedValue(sampleSchedule);
+
+    const res = await handler(makeEvent({
+      resource: '/schedules/{scheduleId}',
+      httpMethod: 'PUT',
+      pathParameters: { scheduleId: 'sched-001' },
+      body: JSON.stringify({ times: [] }),
+    }));
+
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body)).toEqual({ error: 'At least one time is required for absolute schedules' });
+    expect(mockDb.putSchedule).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 when the schedule does not exist', async () => {
+    mockDb.getSchedule.mockResolvedValue(undefined);
+
+    const res = await handler(makeEvent({
+      resource: '/schedules/{scheduleId}',
+      httpMethod: 'PUT',
+      pathParameters: { scheduleId: 'nonexistent' },
+      body: JSON.stringify({ times: ['08:00'] }),
+    }));
+
+    expect(res.statusCode).toBe(404);
+    expect(JSON.parse(res.body)).toEqual({ error: 'Schedule not found' });
+    expect(mockDb.putSchedule).not.toHaveBeenCalled();
+  });
+
+  it('rejects out-of-range times', async () => {
+    mockDb.getSchedule.mockResolvedValue(sampleSchedule);
+
+    const res = await handler(makeEvent({
+      resource: '/schedules/{scheduleId}',
+      httpMethod: 'PUT',
+      pathParameters: { scheduleId: 'sched-001' },
+      body: JSON.stringify({ times: ['99:99'] }),
+    }));
+
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body)).toEqual({ error: 'Time out of range: 99:99' });
+    expect(mockDb.putSchedule).not.toHaveBeenCalled();
+  });
+
+  it('rejects a negative intervalHours', async () => {
+    mockDb.getSchedule.mockResolvedValue(sampleSchedule);
+
+    const res = await handler(makeEvent({
+      resource: '/schedules/{scheduleId}',
+      httpMethod: 'PUT',
+      pathParameters: { scheduleId: 'sched-001' },
+      body: JSON.stringify({ intervalHours: -5 }),
+    }));
+
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body)).toEqual({ error: 'intervalHours must be between 0 and 168' });
+    expect(mockDb.putSchedule).not.toHaveBeenCalled();
+  });
+
+  it('rejects a status outside the allow-list', async () => {
+    mockDb.getSchedule.mockResolvedValue(sampleSchedule);
+
+    const res = await handler(makeEvent({
+      resource: '/schedules/{scheduleId}',
+      httpMethod: 'PUT',
+      pathParameters: { scheduleId: 'sched-001' },
+      body: JSON.stringify({ status: 'garbage' }),
+    }));
+
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body)).toEqual({ error: 'Invalid status' });
+    expect(mockDb.putSchedule).not.toHaveBeenCalled();
+  });
+});
+
+describe('DELETE /schedules/{scheduleId}', () => {
+  it('deletes the schedule', async () => {
+    mockDb.deleteSchedule.mockResolvedValue(undefined);
+
+    const res = await handler(makeEvent({
+      resource: '/schedules/{scheduleId}',
+      httpMethod: 'DELETE',
+      pathParameters: { scheduleId: 'sched-001' },
+    }));
+
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body)).toEqual({ deleted: true });
+    expect(mockDb.deleteSchedule).toHaveBeenCalledWith(DEVICE_ID, 'sched-001');
   });
 });
 
@@ -353,6 +661,23 @@ describe('GET /doses', () => {
 
     expect(res.statusCode).toBe(200);
     expect(mockDb.getDoseEvents).toHaveBeenCalledWith(DEVICE_ID, 10);
+  });
+
+  it.each([
+    ['0', 1],
+    ['999', 200],
+    ['abc', 50],
+  ])('clamps limit %p to %p', async (limit, expected) => {
+    mockDb.getDoseEvents.mockResolvedValue([]);
+
+    const res = await handler(makeEvent({
+      resource: '/doses',
+      httpMethod: 'GET',
+      queryStringParameters: { limit },
+    }));
+
+    expect(res.statusCode).toBe(200);
+    expect(mockDb.getDoseEvents).toHaveBeenCalledWith(DEVICE_ID, expected);
   });
 });
 
@@ -382,8 +707,6 @@ describe('POST /doses', () => {
   });
 
   it('rejects invalid action with 400', async () => {
-    mockDb.putDoseEvent.mockResolvedValue(undefined);
-
     const res = await handler(makeEvent({
       resource: '/doses',
       httpMethod: 'POST',
@@ -395,8 +718,34 @@ describe('POST /doses', () => {
       }),
     }));
 
-    // Accept 400 (validation present) or 201 (validation not yet added)
-    expect([400, 201]).toContain(res.statusCode);
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body)).toEqual({ error: 'Invalid action' });
+    expect(mockDb.putDoseEvent).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['medicineId', 'medicineId is required'],
+    ['scheduleId', 'scheduleId is required'],
+    ['scheduledTime', 'scheduledTime is required'],
+    ['action', 'Invalid action'],
+  ])('rejects a dose missing %s', async (missingField, error) => {
+    const fullBody: Record<string, unknown> = {
+      medicineId: 'med-001',
+      scheduleId: 'sched-001',
+      scheduledTime: '2026-01-01T09:00:00.000Z',
+      action: 'taken',
+    };
+    delete fullBody[missingField];
+
+    const res = await handler(makeEvent({
+      resource: '/doses',
+      httpMethod: 'POST',
+      body: JSON.stringify(fullBody),
+    }));
+
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body)).toEqual({ error });
+    expect(mockDb.putDoseEvent).not.toHaveBeenCalled();
   });
 });
 
@@ -464,6 +813,18 @@ describe('POST /device', () => {
     expect(body.deviceId).not.toBe('');
   });
 
+  it('rejects a non-UUID deviceId (device hijack guard)', async () => {
+    const res = await handler(makeEvent({
+      resource: '/device',
+      httpMethod: 'POST',
+      body: JSON.stringify({ deviceId: 'victim-device', pushToken: 'attacker-token' }),
+    }));
+
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body)).toEqual({ error: 'Invalid deviceId format' });
+    expect(mockDb.putDevice).not.toHaveBeenCalled();
+  });
+
   it('uses default timezone America/New_York when none provided', async () => {
     mockDb.getDevice.mockResolvedValue(undefined);
     mockDb.putDevice.mockResolvedValue(undefined);
@@ -479,10 +840,31 @@ describe('POST /device', () => {
   });
 });
 
+describe('GET /device', () => {
+  it('returns the device for the caller', async () => {
+    mockDb.getDevice.mockResolvedValue(sampleDevice);
+
+    const res = await handler(makeEvent({ resource: '/device', httpMethod: 'GET' }));
+
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body)).toEqual(sampleDevice);
+    expect(mockDb.getDevice).toHaveBeenCalledWith(DEVICE_ID);
+  });
+
+  it('returns 404 when the device is not registered', async () => {
+    mockDb.getDevice.mockResolvedValue(undefined);
+
+    const res = await handler(makeEvent({ resource: '/device', httpMethod: 'GET' }));
+
+    expect(res.statusCode).toBe(404);
+    expect(JSON.parse(res.body)).toEqual({ error: 'Device not found' });
+  });
+});
+
 // ─── Caregiver ────────────────────────────────────────────────────────────────
 
 describe('POST /caregiver', () => {
-  it('generates a caregiver code for an existing device', async () => {
+  it('generates a 6-char A-Z0-9 caregiver code for an existing device', async () => {
     const deviceWithoutCode = { ...sampleDevice, caregiverCode: undefined };
     mockDb.getDevice.mockResolvedValue(deviceWithoutCode);
     mockDb.putDevice.mockResolvedValue(undefined);
@@ -494,8 +876,7 @@ describe('POST /caregiver', () => {
 
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    expect(body.caregiverCode).toBeDefined();
-    expect(body.caregiverCode.length).toBeGreaterThan(0);
+    expect(body.caregiverCode).toMatch(/^[A-Z0-9]{6}$/);
     expect(mockDb.putDevice).toHaveBeenCalledTimes(1);
   });
 
@@ -549,6 +930,34 @@ describe('GET /caregiver/{code}', () => {
     expect(mockDb.getDoseEvents).toHaveBeenCalledWith(sampleDevice.deviceId, 100);
   });
 
+  it('uppercases a lowercase code before lookup', async () => {
+    mockDb.getDeviceByCaregiverCode.mockResolvedValue(sampleDevice);
+    mockDb.getMedicines.mockResolvedValue([]);
+    mockDb.getSchedules.mockResolvedValue([]);
+    mockDb.getDoseEvents.mockResolvedValue([]);
+
+    const res = await handler(makeEvent({
+      resource: '/caregiver/{code}',
+      httpMethod: 'GET',
+      pathParameters: { code: 'abc123' },
+    }));
+
+    expect(res.statusCode).toBe(200);
+    expect(mockDb.getDeviceByCaregiverCode).toHaveBeenCalledWith('ABC123');
+  });
+
+  it('rejects a code that is not exactly 6 characters', async () => {
+    const res = await handler(makeEvent({
+      resource: '/caregiver/{code}',
+      httpMethod: 'GET',
+      pathParameters: { code: 'ABC12' },
+    }));
+
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body)).toEqual({ error: 'Invalid caregiver code format' });
+    expect(mockDb.getDeviceByCaregiverCode).not.toHaveBeenCalled();
+  });
+
   it('returns 404 for an invalid caregiver code', async () => {
     mockDb.getDeviceByCaregiverCode.mockResolvedValue(undefined);
 
@@ -586,28 +995,105 @@ describe('unknown routes', () => {
   });
 });
 
-describe('missing X-Device-Id header', () => {
-  it('returns 500 when X-Device-Id header is absent', async () => {
+describe('X-Device-Id authentication', () => {
+  it('returns 401 when X-Device-Id header is absent', async () => {
     const res = await handler(makeEvent({
       resource: '/medicines',
       httpMethod: 'GET',
       headers: {},
     }));
 
-    expect(res.statusCode).toBe(500);
+    expect(res.statusCode).toBe(401);
     expect(JSON.parse(res.body)).toEqual({ error: 'Missing X-Device-Id header' });
+    expect(mockDb.getMedicines).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['a path traversal string', '../../etc/passwd'],
+    ['an over-long value', 'a'.repeat(129)],
+    ['a non-UUID value', 'test-device-123'],
+  ])('returns 401 for %s', async (_label, deviceId) => {
+    const res = await handler(makeEvent({
+      resource: '/medicines',
+      httpMethod: 'GET',
+      headers: { 'X-Device-Id': deviceId },
+    }));
+
+    expect(res.statusCode).toBe(401);
+    expect(JSON.parse(res.body)).toEqual({ error: 'Invalid X-Device-Id format' });
+    expect(mockDb.getMedicines).not.toHaveBeenCalled();
+  });
+
+  it('accepts the lowercase x-device-id header', async () => {
+    mockDb.getMedicines.mockResolvedValue([]);
+
+    const res = await handler(makeEvent({
+      resource: '/medicines',
+      httpMethod: 'GET',
+      headers: { 'x-device-id': DEVICE_ID },
+    }));
+
+    expect(res.statusCode).toBe(200);
+    expect(mockDb.getMedicines).toHaveBeenCalledWith(DEVICE_ID);
+  });
+});
+
+describe('server errors', () => {
+  it('returns a generic 500 body when the db throws (no internal detail leaked)', async () => {
+    mockDb.getMedicines.mockRejectedValue(new Error('ConditionalCheckFailedException: secret table detail'));
+
+    const res = await handler(makeEvent({ resource: '/medicines', httpMethod: 'GET' }));
+
+    expect(res.statusCode).toBe(500);
+    expect(JSON.parse(res.body)).toEqual({ error: 'Internal server error' });
+  });
+
+  it('returns 400 for a malformed JSON body', async () => {
+    const res = await handler(makeEvent({
+      resource: '/medicines',
+      httpMethod: 'POST',
+      body: '{not json',
+    }));
+
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body)).toEqual({ error: 'Invalid JSON' });
+    expect(mockDb.putMedicine).not.toHaveBeenCalled();
   });
 });
 
 // ─── Response shape ───────────────────────────────────────────────────────────
 
 describe('response headers', () => {
-  it('includes Content-Type and CORS header on every response', async () => {
+  it('includes Content-Type and the restricted CORS origin on every response', async () => {
     mockDb.getMedicines.mockResolvedValue([]);
 
     const res = await handler(makeEvent({ resource: '/medicines', httpMethod: 'GET' }));
 
     expect(res.headers?.['Content-Type']).toBe('application/json');
-    expect(res.headers?.['Access-Control-Allow-Origin']).toBe('*');
+    expect(res.headers?.['Access-Control-Allow-Origin']).toBe(WEB_ORIGIN);
+  });
+
+  it('echoes an allow-listed request origin', async () => {
+    mockDb.getMedicines.mockResolvedValue([]);
+
+    const res = await handler(makeEvent({
+      resource: '/medicines',
+      httpMethod: 'GET',
+      headers: { 'X-Device-Id': DEVICE_ID, origin: 'http://localhost:8081' },
+    }));
+
+    expect(res.headers?.['Access-Control-Allow-Origin']).toBe('http://localhost:8081');
+  });
+
+  it('falls back to the web origin for a non-allow-listed origin', async () => {
+    mockDb.getMedicines.mockResolvedValue([]);
+
+    const res = await handler(makeEvent({
+      resource: '/medicines',
+      httpMethod: 'GET',
+      headers: { 'X-Device-Id': DEVICE_ID, origin: 'https://evil.example' },
+    }));
+
+    expect(res.headers?.['Access-Control-Allow-Origin']).toBe(WEB_ORIGIN);
   });
 });

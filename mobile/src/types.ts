@@ -21,7 +21,7 @@ export interface Schedule {
   medicineId: string;
   type: ScheduleType;
   times?: string[];        // For absolute: ["09:00", "21:00"]
-  intervalHours?: number;  // For interval: 6
+  intervalHours?: number | null;  // For interval: 6 (API returns null for absolute schedules)
   daysOfWeek?: number[];   // 0=Sun..6=Sat, empty=every day
   status: 'active' | 'paused';
   createdAt: string;

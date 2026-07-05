@@ -15,9 +15,20 @@ export const colors = {
   warning: '#B05A00',        // Deep amber
   danger: '#C0392B',         // Strong red (5.6:1 on white)
   paused: '#7A6B5D',         // Muted brown (4.8:1 on white)
-  border: '#C4A882',         // Visible brown border
+  border: '#C4A882',         // Decorative card borders only (2.27:1)
+  borderStrong: '#8A6B45',   // Interactive control borders (>=3:1 per WCAG 1.4.11)
+  overlay: 'rgba(26, 14, 6, 0.5)', // Modal scrim
+  dangerTint: '#FAEBE4',     // Error banner background
   shadow: 'rgba(30, 15, 5, 0.15)',
 };
+
+/** Convert a #RRGGBB hex color to an rgba() string with the given alpha. */
+export function withAlpha(hex: string, alpha: number): string {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
 
 export const spacing = {
   xs: 4,
@@ -39,7 +50,7 @@ export const borderRadius = {
 export const typography = {
   title: {
     fontSize: 28,
-    fontWeight: '700' as const,
+    fontWeight: '800' as const,
     color: colors.text,
   },
   subtitle: {

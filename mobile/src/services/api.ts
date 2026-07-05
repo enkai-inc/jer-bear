@@ -1,7 +1,13 @@
 import { Medicine, Schedule, DoseEvent, Device } from '../types';
+import { appendLog } from './logger';
 
-// Set this after deploying the CDK stack
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://cvjc6vyoyl.execute-api.us-east-1.amazonaws.com/prod';
+// Set via EXPO_PUBLIC_API_URL (see .env.example); the fallback is the last
+// deployed JerBearStack ApiUrl and may go stale
+const FALLBACK_API_URL = 'https://cvjc6vyoyl.execute-api.us-east-1.amazonaws.com/prod';
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || FALLBACK_API_URL;
+if (!process.env.EXPO_PUBLIC_API_URL) {
+  appendLog('warn', 'api', `EXPO_PUBLIC_API_URL not set — using hardcoded fallback ${FALLBACK_API_URL}`);
+}
 
 let deviceId: string | null = null;
 
@@ -124,6 +130,10 @@ export async function recordDose(data: {
 }
 
 // ─── Device ────────────────────────────────────────────────────
+
+export async function fetchDevice(): Promise<Device> {
+  return request('/device');
+}
 
 export async function registerDevice(data: {
   deviceId: string;

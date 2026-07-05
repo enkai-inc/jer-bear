@@ -59,7 +59,8 @@ export function AppNavigator() {
         <Tab.Screen name="Medicines" component={MedicinesStack} />
         <Tab.Screen name="History" component={HistoryScreen} />
         <Tab.Screen name="Caregiver" component={CaregiverScreen} />
-        <Tab.Screen name="Debug" component={DebugScreen} />
+        {/* Dev-only: the debug log exposes app state and must not ship in production */}
+        {__DEV__ && <Tab.Screen name="Debug" component={DebugScreen} />}
       </Tab.Navigator>
     </NavigationContainer>
   );

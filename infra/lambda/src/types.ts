@@ -1,3 +1,7 @@
+// Wire contract for the Jer-Bear API.
+// MUST stay in sync with mobile/src/types.ts — there is no shared package,
+// so any shape change here needs a matching change on the mobile side.
+
 export type MedicineForm = 'tablet' | 'capsule' | 'shot' | 'powder' | 'liquid' | 'drops' | 'puff' | 'other';
 
 export interface Medicine {
@@ -23,8 +27,9 @@ export interface Schedule {
   // For absolute: "09:00", "14:00", "21:00"
   // For interval: not used (intervalHours used instead)
   times?: string[];
-  // For interval: hours between doses (e.g. 6)
-  intervalHours?: number;
+  // For interval: hours between doses (e.g. 6).
+  // The API stores null (not absent) for absolute schedules.
+  intervalHours?: number | null;
   // Days of week (0=Sun, 6=Sat). Empty = every day.
   daysOfWeek?: number[];
   status: 'active' | 'paused';
