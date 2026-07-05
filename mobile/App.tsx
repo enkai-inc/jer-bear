@@ -12,6 +12,8 @@ import {
   setupNotificationCategories,
   scheduleLocalNotifications,
   scheduleSnooze,
+  requestWebNotificationPermission,
+  scheduleWebNotifications,
 } from './src/services/notifications';
 import * as api from './src/services/api';
 
@@ -35,6 +37,7 @@ export default function App() {
       setDeviceId(deviceId);
 
       await setupNotificationCategories();
+      await requestWebNotificationPermission();
       const pushToken = await registerForPushNotifications();
 
       try {
@@ -104,10 +107,11 @@ export default function App() {
     };
   }, []);
 
-  // Re-schedule local notifications whenever medicines or schedules change
+  // Re-schedule notifications whenever medicines or schedules change
   useEffect(() => {
     if (medicines.length > 0 || schedules.length > 0) {
       scheduleLocalNotifications(medicines, schedules);
+      scheduleWebNotifications(medicines, schedules);
     }
   }, [medicines, schedules]);
 
