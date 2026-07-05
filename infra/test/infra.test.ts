@@ -204,3 +204,25 @@ describe('static web hosting', () => {
     });
   });
 });
+
+describe('web asset cache headers', () => {
+  test('hashed bundles are immutable, entry files always revalidate', () => {
+    const deployments = Object.values(
+      template.findResources('Custom::CDKBucketDeployment'),
+    ).map((d) => d.Properties);
+    expect(deployments).toHaveLength(2);
+
+    const entryFiles = ['index.html', 'metadata.json', 'favicon.ico'];
+    const assets = deployments.find((p) => p.Prune !== false);
+    const entry = deployments.find((p) => p.Prune === false);
+
+    expect(assets.SystemMetadata['cache-control']).toBe('max-age=31536000, immutable');
+    expect(assets.Exclude).toEqual(entryFiles);
+
+    expect(entry.SystemMetadata['cache-control']).toBe('no-cache');
+    expect(entry.Include).toEqual(entryFiles);
+    // Only the entry deployment invalidates CloudFront
+    expect(entry.DistributionId).toBeDefined();
+    expect(assets.DistributionId).toBeUndefined();
+  });
+});
