@@ -42,8 +42,9 @@
     ],
     "extra": {
       "eas": {
-        "projectId": ""
+        "projectId": "86600766-d65e-4a33-90ff-9a324f52522f"
       }
-    }
+    },
+    "owner": "tegryan"
   }
 }
