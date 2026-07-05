@@ -251,10 +251,31 @@ export class JerBearStack extends cdk.Stack {
       ),
     });
 
-    // Deploy web assets from Expo web build
+    // Deploy web assets from Expo web build in two passes so browsers can
+    // cache aggressively without ever serving a stale entry point:
+    // content-hashed bundles are immutable; the un-hashed entry files
+    // (index.html etc.) must always be revalidated or the browser keeps
+    // pointing at old bundle URLs after a deploy.
+    const webDist = s3deploy.Source.asset(path.join(__dirname, '..', '..', 'mobile', 'dist'));
+    const mutableFiles = ['index.html', 'metadata.json', 'favicon.ico'];
+
     new s3deploy.BucketDeployment(this, 'DeploySite', {
-      sources: [s3deploy.Source.asset(path.join(__dirname, '..', '..', 'mobile', 'dist'))],
+      sources: [webDist],
       destinationBucket: siteBucket,
+      exclude: mutableFiles,
+      cacheControl: [
+        s3deploy.CacheControl.maxAge(cdk.Duration.days(365)),
+        s3deploy.CacheControl.immutable(),
+      ],
+    });
+
+    new s3deploy.BucketDeployment(this, 'DeploySiteEntry', {
+      sources: [webDist],
+      destinationBucket: siteBucket,
+      exclude: ['*'],
+      include: mutableFiles,
+      prune: false,
+      cacheControl: [s3deploy.CacheControl.noCache()],
       distribution,
       distributionPaths: ['/*'],
     });
