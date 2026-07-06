@@ -1,25 +1,28 @@
 export const colors = {
-  // Bear-themed warm palette — WCAG AA contrast ratios
-  primary: '#4A2510',        // Rich dark brown (11:1 on white)
-  primaryLight: '#7D4520',   // Medium brown
-  primaryDark: '#2C1508',    // Near-black brown
-  accent: '#9A5500',         // Dark amber (5.8:1 on white)
-  accentLight: '#FDEBD0',    // Cream (backgrounds only)
-  background: '#FFFBF5',     // Warm white
+  // "Meadow" palette — calm teal primary with a honey accent nodding to the
+  // bear mascot. All pairings below are WCAG AA validated (see repo README);
+  // text tokens >=4.5:1 on background/surface/surfaceTint, borderStrong and
+  // interactive fills >=3:1 per WCAG 1.4.11.
+  primary: '#0F766E',        // Deep teal — buttons, active tab, stat numbers
+  primaryLight: '#14B8A6',   // Bright teal (decorative only, never text)
+  primaryDark: '#134E4A',    // Near-black teal
+  accent: '#92400E',         // Honey amber — time accents, snooze, bear notes
+  accentLight: '#FEF3C7',    // Soft honey (backgrounds only)
+  background: '#F6FAF8',     // Mint-tinted white
   surface: '#FFFFFF',
-  surfaceWarm: '#FFF3E6',    // Warm surface
-  text: '#1A0E06',           // Near-black brown (16:1 on white)
-  textSecondary: '#5C3D28',  // Medium-dark brown (7.2:1 on white)
+  surfaceTint: '#E9F3EF',    // Soft mint surface (paused cards, icon chips)
+  text: '#152420',           // Near-black green
+  textSecondary: '#4E635B',  // Muted green-grey
   textLight: '#FFFFFF',
-  success: '#1B7A1B',        // Dark green (5.3:1 on white)
-  warning: '#B05A00',        // Deep amber
-  danger: '#C0392B',         // Strong red (5.6:1 on white)
-  paused: '#7A6B5D',         // Muted brown (4.8:1 on white)
-  border: '#C4A882',         // Decorative card borders only (2.27:1)
-  borderStrong: '#8A6B45',   // Interactive control borders (>=3:1 per WCAG 1.4.11)
-  overlay: 'rgba(26, 14, 6, 0.5)', // Modal scrim
-  dangerTint: '#FAEBE4',     // Error banner background
-  shadow: 'rgba(30, 15, 5, 0.15)',
+  success: '#166534',        // Dark green
+  warning: '#A16207',        // Deep amber (dev log warnings)
+  danger: '#B91C1C',         // Strong red
+  paused: '#566B61',         // Muted sage — paused text + badge fill
+  border: '#DCE7E1',         // Decorative card borders only
+  borderStrong: '#6D8A7F',   // Interactive control borders (>=3:1 per WCAG 1.4.11)
+  overlay: 'rgba(13, 27, 22, 0.5)', // Modal scrim
+  dangerTint: '#FDE8E8',     // Error banner background
+  shadow: 'rgba(15, 55, 45, 0.14)',
 };
 
 /** Convert a #RRGGBB hex color to an rgba() string with the given alpha. */

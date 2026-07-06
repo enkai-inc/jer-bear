@@ -254,7 +254,7 @@ const styles = StyleSheet.create({
   },
   codeCard: {
     alignItems: 'center',
-    backgroundColor: colors.surfaceWarm,
+    backgroundColor: colors.surfaceTint,
     borderRadius: borderRadius.md,
     padding: spacing.md,
   },
@@ -304,7 +304,7 @@ const styles = StyleSheet.create({
   },
   lookupInput: {
     flex: 1,
-    backgroundColor: colors.surfaceWarm,
+    backgroundColor: colors.surfaceTint,
     borderRadius: borderRadius.md,
     paddingHorizontal: spacing.md,
     paddingVertical: 12,

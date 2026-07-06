@@ -105,7 +105,7 @@ const styles = StyleSheet.create({
   cardPaused: {
     // No opacity here — opacity-composited text fails WCAG AA contrast.
     // Paused state is signaled by border, background, text color, and badge.
-    backgroundColor: colors.surfaceWarm,
+    backgroundColor: colors.surfaceTint,
     borderColor: colors.paused,
   },
   content: {
