@@ -182,7 +182,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.sm,
     minHeight: 44,
     justifyContent: 'center',
-    backgroundColor: colors.surfaceWarm,
+    backgroundColor: colors.surfaceTint,
     borderRadius: borderRadius.sm,
     alignSelf: 'flex-start',
   },

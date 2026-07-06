@@ -306,7 +306,7 @@ const styles = StyleSheet.create({
   },
   statCard: {
     flex: 1,
-    backgroundColor: colors.surfaceWarm,
+    backgroundColor: colors.surfaceTint,
     borderRadius: borderRadius.md,
     padding: spacing.md,
     alignItems: 'center',
@@ -331,7 +331,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
   },
   emptyCard: {
-    backgroundColor: colors.surfaceWarm,
+    backgroundColor: colors.surfaceTint,
     borderRadius: borderRadius.md,
     padding: spacing.xl,
     alignItems: 'center',
@@ -419,7 +419,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    backgroundColor: colors.surfaceWarm,
+    backgroundColor: colors.surfaceTint,
     borderRadius: borderRadius.md,
     borderWidth: 1,
     borderColor: colors.borderStrong,
